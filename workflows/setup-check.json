@@ -1,0 +1,284 @@
+{
+  "name": "Copper Kettle – Setup Check",
+  "nodes": [
+    {
+      "id": "7c5ef64f-d00f-4abb-9d13-eb9eedbd9c0d",
+      "name": "Run Setup",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        200
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "97bc673f-1699-48bb-b828-858f5e5cdde8",
+      "name": "QuickBooks Setup List",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Everything Copper Kettle needs in the QuickBooks sandbox (Project 3 design doc, section 5b).\n// Names must match the category and branch names used by the invoice workflow.\nconst vendors = [\n  ['Highland Bean Roasters', 'Highland Bean Roasters LLC'],\n  ['Meadow Dairy Co.', 'Meadow Dairy Co.'],\n  ['PackRight Packaging Supply', 'PackRight Packaging Supply, Inc.'],\n  ['BrightClean Commercial Services', 'BrightClean Commercial Services LLC'],\n];\nconst accounts = [\n  'Coffee & Tea', 'Dairy & Milk Alternatives', 'Food & Bakery', 'To-Go Packaging & Disposables',\n  'Kitchen & Cleaning Supplies', 'Cleaning & Maintenance Services', 'Freight & Delivery Fees', 'Sales Tax Paid',\n];\nconst classes = ['Larimer St', 'Highlands', 'Wash Park', 'Shared'];\nconst items = [];\nfor (const [display, company] of vendors) items.push({ kind: 'vendor', name: display, body: { DisplayName: display, CompanyName: company } });\nfor (const a of accounts) items.push({ kind: 'account', name: a, body: { Name: a, AccountType: 'Expense' } });\nfor (const c of classes) items.push({ kind: 'class', name: c, body: { Name: c } });\nreturn items.map(json => ({ json }));"
+      }
+    },
+    {
+      "id": "81cd9014-47ea-4350-9bbb-447ac80deb4d",
+      "name": "Create in QuickBooks",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://sandbox-quickbooks.api.intuit.com/v3/company/YOUR_QUICKBOOKS_COMPANY_ID/{{ $json.kind }}?minorversion=75",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "quickBooksOAuth2Api",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 300
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "023a6be3-596b-42de-9455-878e60442432",
+      "name": "QuickBooks Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// One line per item: created (with its QuickBooks ID), already there, or failed.\nconst asked = $('QuickBooks Setup List').all().map(i => i.json);\nconst rows = $input.all().map((it, i) => {\n  const r = it.json || {};\n  const req = asked[i] || {};\n  const body = r.body || {};\n  const key = req.kind === 'vendor' ? 'Vendor' : req.kind === 'account' ? 'Account' : 'Class';\n  const fault = body.Fault && body.Fault.Error && body.Fault.Error[0];\n  let status;\n  if (r.statusCode === 200 && body[key]) status = 'created (id ' + body[key].Id + ')';\n  else if (fault && /duplicate/i.test(fault.Message + ' ' + (fault.Detail || ''))) status = 'already exists';\n  else status = 'FAILED ' + r.statusCode + ': ' + (fault ? fault.Message + ' – ' + (fault.Detail || '') : JSON.stringify(body).slice(0, 200));\n  return { kind: req.kind, name: req.name, status, id: body[key] ? body[key].Id : null };\n});\nreturn [{ json: { failed: rows.filter(r => r.status.startsWith('FAILED')).length, rows } }];"
+      }
+    },
+    {
+      "id": "26ac6cdd-1809-44c7-91aa-633ac42b82f2",
+      "name": "Test #invoice-review",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.7,
+      "position": [
+        240,
+        200
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_INVOICE_REVIEW_CHANNEL_ID"
+        },
+        "messageType": "text",
+        "text": "Setup check from Invoice Bot: this is #invoice-review. Safe to ignore.",
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      },
+      "executeOnce": true,
+      "webhookId": "82dd72c2-24a0-45c7-a750-63e43f23e1c6"
+    },
+    {
+      "id": "bec43c9d-77dc-4d6e-9ee3-da5ab0e981ce",
+      "name": "Test #automation-errors",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.7,
+      "position": [
+        480,
+        200
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_AUTOMATION_ERRORS_CHANNEL_ID"
+        },
+        "messageType": "text",
+        "text": "Setup check from Invoice Bot: this is #automation-errors. Safe to ignore.",
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      },
+      "executeOnce": true,
+      "webhookId": "443eca02-57cd-487f-839c-c6662f39dc21"
+    },
+    {
+      "id": "242e38b4-f29a-43e7-872e-103634682f4a",
+      "name": "Test #eval-runs",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.7,
+      "position": [
+        720,
+        200
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_EVAL_RUNS_CHANNEL_ID"
+        },
+        "messageType": "text",
+        "text": "Setup check from Invoice Bot: this is #eval-runs. Safe to ignore.",
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      },
+      "executeOnce": true,
+      "webhookId": "43a507ad-9448-4295-a954-f3a98e7601c0"
+    },
+    {
+      "id": "eca88030-8d3c-4bec-9028-b0d3a3807149",
+      "name": "Read p3_eval_cases",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        400
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_EVAL_CASES_TABLE_ID"
+        },
+        "returnAll": true
+      }
+    },
+    {
+      "id": "e21f89f1-d09e-4c77-a1fd-5f1a99d381bc",
+      "name": "Check Answer Key",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        400
+      ],
+      "parameters": {
+        "jsCode": "// Sanity check of the answer key as stored in n8n: counts and sums.\n// Only T08 should have lines that do not add up to the subtotal (by design).\nconst CATS = ['coffee_tea','dairy','food','packaging','supplies','cleaning_services','freight'];\nconst BRANCHES = ['larimer','highlands','washpark','shared'];\nconst out = [];\nfor (const it of $input.all()) {\n  const r = it.json;\n  let lines = [];\n  try { lines = JSON.parse(r.line_items || '[]'); } catch (e) { out.push(r.case_id + ': line_items is not valid JSON'); continue; }\n  if (lines.length !== Number(r.line_count)) out.push(r.case_id + ': ' + lines.length + ' lines, line_count says ' + r.line_count);\n  if (r.expect_is_invoice !== 'yes') continue;\n  const sum = Math.round(lines.reduce((s, l) => s + l.amount, 0) * 100) / 100;\n  if (Math.abs(sum - Number(r.subtotal)) > 0.005) out.push(r.case_id + ': lines add up to ' + sum.toFixed(2) + ', subtotal ' + r.subtotal);\n  const tot = Math.round((Number(r.subtotal) + Number(r.tax)) * 100) / 100;\n  if (Math.abs(tot - Number(r.total)) > 0.005) out.push(r.case_id + ': subtotal + tax = ' + tot + ', total ' + r.total);\n  for (const l of lines) {\n    if (Math.abs(Math.round(l.quantity * l.unit_price * 100) / 100 - l.amount) > 0.005) out.push(r.case_id + ': line math off for ' + l.description);\n    if (!CATS.includes(l.category)) out.push(r.case_id + ': bad category ' + l.category);\n    if (!BRANCHES.includes(l.branch)) out.push(r.case_id + ': bad branch ' + l.branch);\n  }\n}\nreturn [{ json: { rows: $input.all().length, findings: out } }];"
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Run Setup": {
+      "main": [
+        [
+          {
+            "node": "QuickBooks Setup List",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Test #invoice-review",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Read p3_eval_cases",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "QuickBooks Setup List": {
+      "main": [
+        [
+          {
+            "node": "Create in QuickBooks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create in QuickBooks": {
+      "main": [
+        [
+          {
+            "node": "QuickBooks Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Test #invoice-review": {
+      "main": [
+        [
+          {
+            "node": "Test #automation-errors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Test #automation-errors": {
+      "main": [
+        [
+          {
+            "node": "Test #eval-runs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read p3_eval_cases": {
+      "main": [
+        [
+          {
+            "node": "Check Answer Key",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}

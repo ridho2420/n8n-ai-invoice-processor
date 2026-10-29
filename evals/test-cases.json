@@ -1,0 +1,804 @@
+{
+  "criteria_version": "p3-v2",
+  "cases": [
+    {
+      "ord": 1,
+      "case_id": "T01",
+      "file_name": "HB-10482.pdf",
+      "email_no": 1,
+      "case_type": "normal",
+      "expect_route": "recorded",
+      "expect_reason": "",
+      "duplicate_of": "",
+      "expect_is_invoice": "yes",
+      "invoice_number": "HB-10482",
+      "supplier": "Highland Bean Roasters",
+      "invoice_date": "2026-10-02",
+      "due_date": "2026-11-01",
+      "currency": "USD",
+      "subtotal": "797.00",
+      "tax": "0.00",
+      "total": "797.00",
+      "ship_to_branch": "larimer",
+      "line_count": 4,
+      "line_items": [
+        {
+          "description": "Copper House Espresso Blend, 5 lb bag",
+          "quantity": 6.0,
+          "unit_price": 62.5,
+          "amount": 375.0,
+          "branch": "larimer",
+          "category": "coffee_tea"
+        },
+        {
+          "description": "Colombia Huila single origin, 5 lb bag",
+          "quantity": 4.0,
+          "unit_price": 68.0,
+          "amount": 272.0,
+          "branch": "larimer",
+          "category": "coffee_tea"
+        },
+        {
+          "description": "Swiss Water Decaf, 5 lb bag",
+          "quantity": 2.0,
+          "unit_price": 66.0,
+          "amount": 132.0,
+          "branch": "larimer",
+          "category": "coffee_tea"
+        },
+        {
+          "description": "Freight – Denver delivery route",
+          "quantity": 1.0,
+          "unit_price": 18.0,
+          "amount": 18.0,
+          "branch": "larimer",
+          "category": "freight"
+        }
+      ],
+      "note": "Clean digital invoice. Tax is printed as 0.00 (exempt), so the expected tax is 0, not null."
+    },
+    {
+      "ord": 2,
+      "case_id": "T02",
+      "file_name": "MeadowDairy_INV-2041.pdf",
+      "email_no": 2,
+      "case_type": "normal",
+      "expect_route": "recorded",
+      "expect_reason": "",
+      "duplicate_of": "",
+      "expect_is_invoice": "yes",
+      "invoice_number": "INV-2041",
+      "supplier": "Meadow Dairy Co.",
+      "invoice_date": "2026-10-04",
+      "due_date": "2026-10-19",
+      "currency": "USD",
+      "subtotal": "339.00",
+      "tax": "0.00",
+      "total": "339.00",
+      "ship_to_branch": "highlands",
+      "line_count": 5,
+      "line_items": [
+        {
+          "description": "Whole milk",
+          "quantity": 24.0,
+          "unit_price": 4.35,
+          "amount": 104.4,
+          "branch": "highlands",
+          "category": "dairy"
+        },
+        {
+          "description": "2% reduced-fat milk",
+          "quantity": 12.0,
+          "unit_price": 4.2,
+          "amount": 50.4,
+          "branch": "highlands",
+          "category": "dairy"
+        },
+        {
+          "description": "Oat milk, barista edition",
+          "quantity": 36.0,
+          "unit_price": 3.15,
+          "amount": 113.4,
+          "branch": "highlands",
+          "category": "dairy"
+        },
+        {
+          "description": "Heavy cream",
+          "quantity": 6.0,
+          "unit_price": 9.8,
+          "amount": 58.8,
+          "branch": "highlands",
+          "category": "dairy"
+        },
+        {
+          "description": "Delivery fee",
+          "quantity": 1.0,
+          "unit_price": 12.0,
+          "amount": 12.0,
+          "branch": "highlands",
+          "category": "freight"
+        }
+      ],
+      "note": "US date format 10/04/2026 = October 4 (the due date 10/19 confirms month first). Also prints an account number and a PO number next to the invoice number. The delivery address is labelled 'Deliver to', not 'Ship to'."
+    },
+    {
+      "ord": 3,
+      "case_id": "T03",
+      "file_name": "PackRight_INV-2036.pdf",
+      "email_no": 3,
+      "case_type": "normal",
+      "expect_route": "recorded",
+      "expect_reason": "",
+      "duplicate_of": "",
+      "expect_is_invoice": "yes",
+      "invoice_number": "INV-2036",
+      "supplier": "PackRight Packaging Supply",
+      "invoice_date": "2026-10-06",
+      "due_date": "2026-11-05",
+      "currency": "USD",
+      "subtotal": "2356.70",
+      "tax": "194.43",
+      "total": "2551.13",
+      "ship_to_branch": "larimer",
+      "line_count": 21,
+      "line_items": [
+        {
+          "description": "8 oz hot cup, kraft, 1000/cs",
+          "quantity": 1.0,
+          "unit_price": 72.0,
+          "amount": 72.0,
+          "branch": "larimer",
+          "category": "packaging"
+        },
+        {
+          "description": "12 oz hot cup, kraft, 1000/cs",
+          "quantity": 3.0,
+          "unit_price": 84.5,
+          "amount": 253.5,
+          "branch": "larimer",
+          "category": "packaging"
+        },
+        {
+          "description": "16 oz hot cup, kraft, 1000/cs",
+          "quantity": 4.0,
+          "unit_price": 96.0,
+          "amount": 384.0,
+          "branch": "larimer",
+          "category": "packaging"
+        },
+        {
+          "description": "Hot lid, fits 8 oz, 1000/cs",
+          "quantity": 1.0,
+          "unit_price": 38.0,
+          "amount": 38.0,
+          "branch": "larimer",
+          "category": "packaging"
+        },
+        {
+          "description": "Hot lid, fits 12-20 oz, 1000/cs",
+          "quantity": 6.0,
+          "unit_price": 41.25,
+          "amount": 247.5,
+          "branch": "larimer",
+          "category": "packaging"
+        },
+        {
+          "description": "Cup sleeve, kraft, 1200/cs",
+          "quantity": 3.0,
+          "unit_price": 46.8,
+          "amount": 140.4,
+          "branch": "larimer",
+          "category": "packaging"
+        },
+        {
+          "description": "16 oz cold cup, PET, 1000/cs",
+          "quantity": 2.0,
+          "unit_price": 88.0,
+          "amount": 176.0,
+          "branch": "larimer",
+          "category": "packaging"
+        },
+        {
+          "description": "20 oz cold cup, PET, 1000/cs",
+          "quantity": 2.0,
+          "unit_price": 97.5,
+          "amount": 195.0,
+          "branch": "larimer",
+          "category": "packaging"
+        },
+        {
+          "description": "Strawless sip lid, 98 mm, 1000/cs",
+          "quantity": 3.0,
+          "unit_price": 52.0,
+          "amount": 156.0,
+          "branch": "larimer",
+          "category": "packaging"
+        },
+        {
+          "description": "Paper straw, wrapped, 3000/cs",
+          "quantity": 1.0,
+          "unit_price": 64.0,
+          "amount": 64.0,
+          "branch": "larimer",
+          "category": "packaging"
+        },
+        {
+          "description": "4-cup carrier, molded fiber, 300/cs",
+          "quantity": 1.0,
+          "unit_price": 58.6,
+          "amount": 58.6,
+          "branch": "larimer",
+          "category": "packaging"
+        },
+        {
+          "description": "#6 kraft bag, 500/bundle",
+          "quantity": 2.0,
+          "unit_price": 27.4,
+          "amount": 54.8,
+          "branch": "larimer",
+          "category": "packaging"
+        },
+        {
+          "description": "Glassine pastry bag, 1000/cs",
+          "quantity": 1.0,
+          "unit_price": 39.9,
+          "amount": 39.9,
+          "branch": "larimer",
+          "category": "packaging"
+        },
+        {
+          "description": "Dinner napkin, 2-ply, 3000/cs",
+          "quantity": 2.0,
+          "unit_price": 44.0,
+          "amount": 88.0,
+          "branch": "larimer",
+          "category": "packaging"
+        },
+        {
+          "description": "Wooden stirrer, 7 in, 10000/cs",
+          "quantity": 1.0,
+          "unit_price": 31.5,
+          "amount": 31.5,
+          "branch": "larimer",
+          "category": "packaging"
+        },
+        {
+          "description": "Nitrile gloves, medium, 100/box",
+          "quantity": 10.0,
+          "unit_price": 8.95,
+          "amount": 89.5,
+          "branch": "larimer",
+          "category": "supplies"
+        },
+        {
+          "description": "Nitrile gloves, large, 100/box",
+          "quantity": 6.0,
+          "unit_price": 8.95,
+          "amount": 53.7,
+          "branch": "larimer",
+          "category": "supplies"
+        },
+        {
+          "description": "C-fold paper towel, 2400/cs",
+          "quantity": 2.0,
+          "unit_price": 36.75,
+          "amount": 73.5,
+          "branch": "larimer",
+          "category": "supplies"
+        },
+        {
+          "description": "Day-of-week labels, 1000/roll",
+          "quantity": 4.0,
+          "unit_price": 6.2,
+          "amount": 24.8,
+          "branch": "larimer",
+          "category": "supplies"
+        },
+        {
+          "description": "32 oz kraft soup container, 500/cs",
+          "quantity": 1.0,
+          "unit_price": 71.0,
+          "amount": 71.0,
+          "branch": "larimer",
+          "category": "packaging"
+        },
+        {
+          "description": "Freight",
+          "quantity": 1.0,
+          "unit_price": 45.0,
+          "amount": 45.0,
+          "branch": "larimer",
+          "category": "freight"
+        }
+      ],
+      "note": "21 lines over two pages. Totals are only on page 2. Mixed invoice: 16 packaging lines, 4 supplies lines (gloves, paper towel, labels) and freight. The glassine pastry bag is packaging, not food. The address block labelled 'SOLD TO' is the head office, not a branch."
+    },
+    {
+      "ord": 4,
+      "case_id": "T04",
+      "file_name": "BrightClean_BC-2026-0412.pdf",
+      "email_no": 4,
+      "case_type": "normal",
+      "expect_route": "recorded",
+      "expect_reason": "",
+      "duplicate_of": "",
+      "expect_is_invoice": "yes",
+      "invoice_number": "BC-2026-0412",
+      "supplier": "BrightClean Commercial Services",
+      "invoice_date": "2026-10-01",
+      "due_date": "2026-10-31",
+      "currency": "USD",
+      "subtotal": "4161.50",
+      "tax": "0.00",
+      "total": "4161.50",
+      "ship_to_branch": null,
+      "line_count": 5,
+      "line_items": [
+        {
+          "description": "Nightly janitorial – Larimer St store (22 visits)",
+          "quantity": 22.0,
+          "unit_price": 58.0,
+          "amount": 1276.0,
+          "branch": "larimer",
+          "category": "cleaning_services"
+        },
+        {
+          "description": "Nightly janitorial – Highlands store (22 visits)",
+          "quantity": 22.0,
+          "unit_price": 52.0,
+          "amount": 1144.0,
+          "branch": "highlands",
+          "category": "cleaning_services"
+        },
+        {
+          "description": "Nightly janitorial – Wash Park store (22 visits)",
+          "quantity": 22.0,
+          "unit_price": 52.0,
+          "amount": 1144.0,
+          "branch": "washpark",
+          "category": "cleaning_services"
+        },
+        {
+          "description": "Hood and grease trap cleaning – Larimer St, Sep 19",
+          "quantity": 3.5,
+          "unit_price": 85.0,
+          "amount": 297.5,
+          "branch": "larimer",
+          "category": "cleaning_services"
+        },
+        {
+          "description": "Floor strip and wax – Highlands, Sep 26",
+          "quantity": 4.0,
+          "unit_price": 75.0,
+          "amount": 300.0,
+          "branch": "highlands",
+          "category": "cleaning_services"
+        }
+      ],
+      "note": "Service invoice: hours and visits instead of products, one decimal quantity (3.5). No ship-to address: each line names its own store, so the branch comes from the line, not the header. The client block lists all three locations, which must not become a single branch."
+    },
+    {
+      "ord": 5,
+      "case_id": "T05",
+      "file_name": "BrightClean_Service_Menu_2027.pdf",
+      "email_no": 4,
+      "case_type": "not_invoice",
+      "expect_route": "not_invoice",
+      "expect_reason": "",
+      "duplicate_of": "",
+      "expect_is_invoice": "no",
+      "invoice_number": null,
+      "supplier": null,
+      "invoice_date": null,
+      "due_date": null,
+      "currency": null,
+      "subtotal": null,
+      "tax": null,
+      "total": null,
+      "ship_to_branch": null,
+      "line_count": 0,
+      "line_items": [],
+      "note": "Price list attached to the same email as T04. Has prices and a supplier name, but no invoice number, bill-to or amount due."
+    },
+    {
+      "ord": 6,
+      "case_id": "T06",
+      "file_name": "Scan_2026-10-09_0842.pdf",
+      "email_no": 5,
+      "case_type": "scan",
+      "expect_route": "recorded",
+      "expect_reason": "",
+      "duplicate_of": "",
+      "expect_is_invoice": "yes",
+      "invoice_number": "HB-10519",
+      "supplier": "Highland Bean Roasters",
+      "invoice_date": "2026-10-09",
+      "due_date": "2026-11-08",
+      "currency": "USD",
+      "subtotal": "972.00",
+      "tax": "0.00",
+      "total": "972.00",
+      "ship_to_branch": "washpark",
+      "line_count": 4,
+      "line_items": [
+        {
+          "description": "Copper House Espresso Blend, 5 lb bag",
+          "quantity": 8.0,
+          "unit_price": 62.5,
+          "amount": 500.0,
+          "branch": "washpark",
+          "category": "coffee_tea"
+        },
+        {
+          "description": "Ethiopia Yirgacheffe single origin, 5 lb bag",
+          "quantity": 3.0,
+          "unit_price": 74.0,
+          "amount": 222.0,
+          "branch": "washpark",
+          "category": "coffee_tea"
+        },
+        {
+          "description": "Cold Brew Coarse Blend, 5 lb bag",
+          "quantity": 4.0,
+          "unit_price": 58.0,
+          "amount": 232.0,
+          "branch": "washpark",
+          "category": "coffee_tea"
+        },
+        {
+          "description": "Freight – Denver delivery route",
+          "quantity": 1.0,
+          "unit_price": 18.0,
+          "amount": 18.0,
+          "branch": "washpark",
+          "category": "freight"
+        }
+      ],
+      "note": "Office-scanner copy: image only, no text layer. Extract from File returns no text, so this must go to the document-reading path."
+    },
+    {
+      "ord": 7,
+      "case_id": "T07",
+      "file_name": "IMG_4471.pdf",
+      "email_no": 6,
+      "case_type": "scan",
+      "expect_route": "recorded",
+      "expect_reason": "",
+      "duplicate_of": "",
+      "expect_is_invoice": "yes",
+      "invoice_number": "INV-2058",
+      "supplier": "Meadow Dairy Co.",
+      "invoice_date": "2026-10-11",
+      "due_date": "2026-10-26",
+      "currency": "USD",
+      "subtotal": "353.20",
+      "tax": "0.00",
+      "total": "353.20",
+      "ship_to_branch": "larimer",
+      "line_count": 5,
+      "line_items": [
+        {
+          "description": "Whole milk",
+          "quantity": 24.0,
+          "unit_price": 4.35,
+          "amount": 104.4,
+          "branch": "larimer",
+          "category": "dairy"
+        },
+        {
+          "description": "Oat milk, barista edition",
+          "quantity": 48.0,
+          "unit_price": 3.15,
+          "amount": 151.2,
+          "branch": "larimer",
+          "category": "dairy"
+        },
+        {
+          "description": "Almond milk, barista edition",
+          "quantity": 12.0,
+          "unit_price": 3.4,
+          "amount": 40.8,
+          "branch": "larimer",
+          "category": "dairy"
+        },
+        {
+          "description": "Half and half",
+          "quantity": 8.0,
+          "unit_price": 5.6,
+          "amount": 44.8,
+          "branch": "larimer",
+          "category": "dairy"
+        },
+        {
+          "description": "Delivery fee",
+          "quantity": 1.0,
+          "unit_price": 12.0,
+          "amount": 12.0,
+          "branch": "larimer",
+          "category": "freight"
+        }
+      ],
+      "note": "Phone photo of a paper invoice: tilted, uneven light, image only. 10/11/2026 is October 11 (due 10/26/2026, Net 15)."
+    },
+    {
+      "ord": 8,
+      "case_id": "T08",
+      "file_name": "PackRight_INV-2039.pdf",
+      "email_no": 7,
+      "case_type": "anomaly",
+      "expect_route": "needs_review",
+      "expect_reason": "sum_mismatch",
+      "duplicate_of": "",
+      "expect_is_invoice": "yes",
+      "invoice_number": "INV-2039",
+      "supplier": "PackRight Packaging Supply",
+      "invoice_date": "2026-10-13",
+      "due_date": "2026-11-12",
+      "currency": "USD",
+      "subtotal": "1420.00",
+      "tax": "117.15",
+      "total": "1537.15",
+      "ship_to_branch": "highlands",
+      "line_count": 6,
+      "line_items": [
+        {
+          "description": "12 oz hot cup, kraft, 1000/cs",
+          "quantity": 4.0,
+          "unit_price": 84.5,
+          "amount": 338.0,
+          "branch": "highlands",
+          "category": "packaging"
+        },
+        {
+          "description": "16 oz hot cup, kraft, 1000/cs",
+          "quantity": 4.0,
+          "unit_price": 96.0,
+          "amount": 384.0,
+          "branch": "highlands",
+          "category": "packaging"
+        },
+        {
+          "description": "Hot lid, fits 12-20 oz, 1000/cs",
+          "quantity": 4.0,
+          "unit_price": 41.25,
+          "amount": 165.0,
+          "branch": "highlands",
+          "category": "packaging"
+        },
+        {
+          "description": "Dinner napkin, 2-ply, 3000/cs",
+          "quantity": 3.0,
+          "unit_price": 44.0,
+          "amount": 132.0,
+          "branch": "highlands",
+          "category": "packaging"
+        },
+        {
+          "description": "16 oz cold cup, PET, 1000/cs",
+          "quantity": 2.0,
+          "unit_price": 88.0,
+          "amount": 176.0,
+          "branch": "highlands",
+          "category": "packaging"
+        },
+        {
+          "description": "Freight",
+          "quantity": 1.0,
+          "unit_price": 45.0,
+          "amount": 45.0,
+          "branch": "highlands",
+          "category": "freight"
+        }
+      ],
+      "note": "The lines add up to 1,240.00 but the printed subtotal is 1,420.00 (digits swapped). Tax and total follow the wrong subtotal, so subtotal + tax = total still holds. The answer key keeps the printed numbers: an AI that quietly 'fixes' the subtotal fails."
+    },
+    {
+      "ord": 9,
+      "case_id": "T09",
+      "file_name": "BrightClean_BC-2026-0419.pdf",
+      "email_no": 8,
+      "case_type": "anomaly",
+      "expect_route": "needs_review",
+      "expect_reason": "due_before_invoice",
+      "duplicate_of": "",
+      "expect_is_invoice": "yes",
+      "invoice_number": "BC-2026-0419",
+      "supplier": "BrightClean Commercial Services",
+      "invoice_date": "2026-10-14",
+      "due_date": "2026-09-14",
+      "currency": "USD",
+      "subtotal": "655.00",
+      "tax": "0.00",
+      "total": "655.00",
+      "ship_to_branch": null,
+      "line_count": 2,
+      "line_items": [
+        {
+          "description": "Window cleaning, inside and out – all 3 stores",
+          "quantity": 3.0,
+          "unit_price": 145.0,
+          "amount": 435.0,
+          "branch": "shared",
+          "category": "cleaning_services"
+        },
+        {
+          "description": "Carpet shampoo – Highlands seating area",
+          "quantity": 1.0,
+          "unit_price": 220.0,
+          "amount": 220.0,
+          "branch": "highlands",
+          "category": "cleaning_services"
+        }
+      ],
+      "note": "Due date printed as Sep 14, 2026, a month before the invoice date (Oct 14, Net 30). The key keeps the printed due date. Line 1 covers all three stores, so its branch is 'shared' (split equally in reports)."
+    },
+    {
+      "ord": 10,
+      "case_id": "T10",
+      "file_name": "MeadowDairy_Invoice_Oct16.pdf",
+      "email_no": 9,
+      "case_type": "anomaly",
+      "expect_route": "needs_review",
+      "expect_reason": "missing_invoice_number",
+      "duplicate_of": "",
+      "expect_is_invoice": "yes",
+      "invoice_number": null,
+      "supplier": "Meadow Dairy Co.",
+      "invoice_date": "2026-10-16",
+      "due_date": "2026-10-31",
+      "currency": "USD",
+      "subtotal": "306.30",
+      "tax": "0.00",
+      "total": "306.30",
+      "ship_to_branch": "washpark",
+      "line_count": 4,
+      "line_items": [
+        {
+          "description": "Whole milk",
+          "quantity": 30.0,
+          "unit_price": 4.35,
+          "amount": 130.5,
+          "branch": "washpark",
+          "category": "dairy"
+        },
+        {
+          "description": "2% reduced-fat milk",
+          "quantity": 12.0,
+          "unit_price": 4.2,
+          "amount": 50.4,
+          "branch": "washpark",
+          "category": "dairy"
+        },
+        {
+          "description": "Oat milk, barista edition",
+          "quantity": 36.0,
+          "unit_price": 3.15,
+          "amount": 113.4,
+          "branch": "washpark",
+          "category": "dairy"
+        },
+        {
+          "description": "Delivery fee",
+          "quantity": 1.0,
+          "unit_price": 12.0,
+          "amount": 12.0,
+          "branch": "washpark",
+          "category": "freight"
+        }
+      ],
+      "note": "The 'Invoice #' field is printed empty. The account number (CK-0042) and PO number (PO-5512) are traps: neither is the invoice number, so the expected value is null."
+    },
+    {
+      "ord": 11,
+      "case_id": "T11",
+      "file_name": "HB-10482_reminder.pdf",
+      "email_no": 10,
+      "case_type": "duplicate",
+      "expect_route": "duplicate",
+      "expect_reason": "",
+      "duplicate_of": "T01",
+      "expect_is_invoice": "yes",
+      "invoice_number": "HB-10482",
+      "supplier": "Highland Bean Roasters",
+      "invoice_date": "2026-10-02",
+      "due_date": "2026-11-01",
+      "currency": "USD",
+      "subtotal": "797.00",
+      "tax": "0.00",
+      "total": "797.00",
+      "ship_to_branch": "larimer",
+      "line_count": 4,
+      "line_items": [
+        {
+          "description": "Copper House Espresso Blend, 5 lb bag",
+          "quantity": 6.0,
+          "unit_price": 62.5,
+          "amount": 375.0,
+          "branch": "larimer",
+          "category": "coffee_tea"
+        },
+        {
+          "description": "Colombia Huila single origin, 5 lb bag",
+          "quantity": 4.0,
+          "unit_price": 68.0,
+          "amount": 272.0,
+          "branch": "larimer",
+          "category": "coffee_tea"
+        },
+        {
+          "description": "Swiss Water Decaf, 5 lb bag",
+          "quantity": 2.0,
+          "unit_price": 66.0,
+          "amount": 132.0,
+          "branch": "larimer",
+          "category": "coffee_tea"
+        },
+        {
+          "description": "Freight – Denver delivery route",
+          "quantity": 1.0,
+          "unit_price": 18.0,
+          "amount": 18.0,
+          "branch": "larimer",
+          "category": "freight"
+        }
+      ],
+      "note": "Same invoice as T01 with a reminder stamp. Fields are identical to T01. Same supplier + same number + same total = duplicate."
+    },
+    {
+      "ord": 12,
+      "case_id": "T12",
+      "file_name": "PackRight_INV-2041.pdf",
+      "email_no": 11,
+      "case_type": "duplicate_trap",
+      "expect_route": "recorded",
+      "expect_reason": "",
+      "duplicate_of": "",
+      "expect_is_invoice": "yes",
+      "invoice_number": "INV-2041",
+      "supplier": "PackRight Packaging Supply",
+      "invoice_date": "2026-10-17",
+      "due_date": "2026-11-16",
+      "currency": "USD",
+      "subtotal": "601.20",
+      "tax": "49.60",
+      "total": "650.80",
+      "ship_to_branch": "washpark",
+      "line_count": 4,
+      "line_items": [
+        {
+          "description": "16 oz cold cup, PET, 1000/cs",
+          "quantity": 3.0,
+          "unit_price": 88.0,
+          "amount": 264.0,
+          "branch": "washpark",
+          "category": "packaging"
+        },
+        {
+          "description": "Strawless sip lid, 98 mm, 1000/cs",
+          "quantity": 3.0,
+          "unit_price": 52.0,
+          "amount": 156.0,
+          "branch": "washpark",
+          "category": "packaging"
+        },
+        {
+          "description": "Paper straw, wrapped, 3000/cs",
+          "quantity": 1.0,
+          "unit_price": 64.0,
+          "amount": 64.0,
+          "branch": "washpark",
+          "category": "packaging"
+        },
+        {
+          "description": "4-cup carrier, molded fiber, 300/cs",
+          "quantity": 2.0,
+          "unit_price": 58.6,
+          "amount": 117.2,
+          "branch": "washpark",
+          "category": "packaging"
+        }
+      ],
+      "note": "Same invoice number as T02 (INV-2041) but from a different supplier. A duplicate check that only looks at the number would wrongly skip it."
+    }
+  ]
+}

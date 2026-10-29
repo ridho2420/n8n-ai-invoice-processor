@@ -1,0 +1,207 @@
+{
+  "name": "Copper Kettle – Error Alerts",
+  "nodes": [
+    {
+      "id": "8b24f1e3-e43c-48d8-a5d4-5f20c8c360cf",
+      "name": "When Invoice Processor Fails",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "107514e4-6d92-4990-8e09-76434141180c",
+      "name": "Alert Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Copper Kettle – Error Alerts: runs when the Invoice Processor stops with an error\n// (production runs only). Writes the alert for #automation-errors and one row for\n// p3_processing_log. The run may have stopped half-way, so the message says how to\n// check what was already recorded before the email is forwarded again.\nconst esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst short = (s, n = 400) => (String(s).length > n ? String(s).slice(0, n - 1) + '…' : String(s));\n\n// Hint by the node that failed (node names of the Invoice Processor).\nconst HINTS = [\n  [/QuickBooks|Create Bill|Attach PDF/i, 'QuickBooks: in n8n, check that the credential uses the Sandbox environment and reconnect it (open n8n through the ngrok address).'],\n  [/Gmail|Email|Drive|Test File/i, 'Google: reconnect the Gmail and Drive credentials, opening n8n through the ngrok address. The Google app is in Testing, so access expires every 7 days.'],\n  [/Airtable|Invoice Record|Line Items|Earlier Invoices|Bill ID/i, 'Airtable: check the token \"n8n Copper Kettle AP\" and that no field in the base was renamed.'],\n  [/Gemini/i, 'Gemini: check the API key, the model name and the quota.'],\n  [/Slack/i, 'Slack: check that Invoice Bot is still in the channel and its token is valid.'],\n  [/Save Log/i, 'n8n data table p3_processing_log: check that the table and its columns still exist.'],\n];\n\nconst out = [];\nfor (const item of $input.all()) {\n  const e = item.json || {};\n  const exec = e.execution || null;\n  const wfName = (e.workflow && e.workflow.name) || 'A workflow';\n  const failedAt = exec ? exec.lastNodeExecuted : (e.trigger && e.trigger.error && e.trigger.error.node && e.trigger.error.node.name) || 'the trigger';\n  const error = exec ? exec.error : (e.trigger && e.trigger.error) || {};\n  const message = (error && (error.message || error.description)) || 'unknown error';\n  const hint = (HINTS.find(([re]) => re.test(failedAt || '')) || [null, 'This looks like a bug in a code step. Open the execution and fix it before forwarding the email again.'])[1];\n  const execRef = exec ? `execution ${exec.id}` : 'no execution was started';\n\n  const lines = [\n    `🛑 ${esc(wfName)} stopped at \"${esc(failedAt)}\" (${execRef}).`,\n    exec\n      ? `Impact: the invoices in this run may be only partly recorded. Before forwarding the email again, look in Airtable for records with Execution ID ${exec.id}, so nothing is recorded twice.`\n      : 'Impact: no email was processed.',\n    'Saved: the email is still in the inbox.',\n    `Next: ${hint}`,\n    `Error: ${esc(short(message))}`,\n  ];\n  if (exec && exec.url) lines.push(`<${exec.url}|Open the execution>`);\n\n  out.push({\n    json: {\n      text: lines.join('\\n'),\n      log: {\n        received_at: new Date().toISOString(),\n        mode: 'error_workflow',\n        route: 'error',\n        error_step: String(failedAt),\n        error_message: short(message, 1000),\n        execution_id: exec ? String(exec.id) : null,\n      },\n    },\n  });\n}\nreturn out;\n"
+      }
+    },
+    {
+      "id": "2cd53702-4b92-475b-83af-2200ac5b179d",
+      "name": "Save Log",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_PROCESSING_LOG_TABLE_ID",
+          "cachedResultName": "p3_processing_log"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "received_at": "={{ $json.log.received_at }}",
+            "mode": "={{ $json.log.mode }}",
+            "route": "={{ $json.log.route }}",
+            "error_step": "={{ $json.log.error_step }}",
+            "error_message": "={{ $json.log.error_message }}",
+            "execution_id": "={{ $json.log.execution_id }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "received_at",
+              "displayName": "received_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "mode",
+              "displayName": "mode",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "route",
+              "displayName": "route",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "error_step",
+              "displayName": "error_step",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "error_message",
+              "displayName": "error_message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "execution_id",
+              "displayName": "execution_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "c30304e9-9485-43b0-9493-2a58644b0e8b",
+      "name": "Slack: Automation Errors",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.7,
+      "position": [
+        720,
+        0
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_AUTOMATION_ERRORS_CHANNEL_ID"
+        },
+        "messageType": "text",
+        "text": "={{ $('Alert Message').item.json.text }}",
+        "otherOptions": {
+          "includeLinkToWorkflow": false,
+          "unfurl_links": false,
+          "unfurl_media": false
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "webhookId": "20ba60a1-535f-4f2c-a0c3-1bcf9f326926"
+    },
+    {
+      "id": "981e9b59-77af-48f4-95f8-2064dd5d2fc0",
+      "name": "Sticky Note dfbccc41",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -50,
+        -50
+      ],
+      "parameters": {
+        "content": "## Copper Kettle – Error Alerts\nRuns when the Invoice Processor stops with an error (production runs only). Logs the failure in p3_processing_log, then tells #automation-errors which step failed, that the run may be only partly recorded (check Airtable by Execution ID before forwarding the email again), and what to check for that step.",
+        "color": 2,
+        "width": 1020,
+        "height": 200
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When Invoice Processor Fails": {
+      "main": [
+        [
+          {
+            "node": "Alert Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Message": {
+      "main": [
+        [
+          {
+            "node": "Save Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Log": {
+      "main": [
+        [
+          {
+            "node": "Slack: Automation Errors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}

@@ -1,0 +1,11 @@
+# Never commit secrets
+.env
+*.env
+credentials*.json
+*.pem
+
+# Local files
+.DS_Store
+*.mov
+*.mp4
+node_modules/

@@ -1,0 +1,253 @@
+{
+  "about": "Project 3 (AI Invoice Processor) test set: 12 fictional supplier documents for Copper Kettle Café. This file is the single source: the PDFs and the answer key (p3_eval_cases) are generated from it by make_test_set.py. Amounts are computed by the script (qty x unit price, sum, tax rounded half-up) unless a printed override is given. Written 22 Oct 2026, criteria p3-v1.",
+  "criteria_version": "p3-v1",
+  "company": {
+    "name": "Copper Kettle Café",
+    "legal_name": "Copper Kettle Café LLC",
+    "bill_to": ["Copper Kettle Café LLC", "Attn: Accounts Payable", "2150 Blake St", "Denver, CO 80205"],
+    "locations": {
+      "larimer": "Copper Kettle Café – Larimer St, 1530 Larimer St, Denver, CO 80202",
+      "highlands": "Copper Kettle Café – Highlands, 3311 W 32nd Ave, Denver, CO 80211",
+      "washpark": "Copper Kettle Café – Wash Park, 1040 S Gaylord St, Denver, CO 80209"
+    }
+  },
+  "suppliers": {
+    "highland": {
+      "name": "Highland Bean Roasters",
+      "legal_name": "Highland Bean Roasters LLC",
+      "tagline": "Small-batch coffee roasted in Fort Collins, Colorado",
+      "address": ["418 Linden St", "Fort Collins, CO 80524"],
+      "phone": "(970) 555-0148",
+      "email": "billing@highlandbean.example.com",
+      "date_format": "%B %-d, %Y"
+    },
+    "meadow": {
+      "name": "Meadow Dairy Co.",
+      "legal_name": "Meadow Dairy Co.",
+      "tagline": "Fresh dairy and barista milks, delivered daily",
+      "address": ["7700 County Road 2", "Brighton, CO 80603"],
+      "phone": "(303) 555-0162",
+      "email": "ar@meadowdairy.example.com",
+      "date_format": "%m/%d/%Y"
+    },
+    "packright": {
+      "name": "PackRight Packaging Supply",
+      "legal_name": "PackRight Packaging Supply, Inc.",
+      "tagline": "Foodservice packaging and janitorial supplies",
+      "address": ["4825 Holly St, Unit B", "Denver, CO 80216"],
+      "phone": "(720) 555-0117",
+      "email": "invoices@packright.example.com",
+      "date_format": "%Y-%m-%d"
+    },
+    "brightclean": {
+      "name": "BrightClean Commercial Services",
+      "legal_name": "BrightClean Commercial Services LLC",
+      "tagline": "Janitorial and specialty cleaning for restaurants and cafés",
+      "address": ["1390 S Broadway, Suite 210", "Denver, CO 80210"],
+      "phone": "(303) 555-0189",
+      "email": "billing@brightclean.example.com",
+      "date_format": "%b %-d, %Y"
+    }
+  },
+  "cases": [
+    {
+      "case_id": "T01", "ord": 1, "email_no": 1, "file_name": "HB-10482.pdf",
+      "case_type": "normal", "supplier": "highland", "render": "text",
+      "invoice_number": "HB-10482", "invoice_date": "2026-10-02", "due_date": "2026-11-01", "terms": "Net 30",
+      "ship_to": "larimer",
+      "tax_rate": "0", "tax_label": "Sales tax (exempt – resale)",
+      "lines": [
+        {"sku": "ESP-CH5", "description": "Copper House Espresso Blend, 5 lb bag", "qty": "6", "unit_price": "62.50"},
+        {"sku": "COL-HU5", "description": "Colombia Huila single origin, 5 lb bag", "qty": "4", "unit_price": "68.00"},
+        {"sku": "DEC-SW5", "description": "Swiss Water Decaf, 5 lb bag", "qty": "2", "unit_price": "66.00"},
+        {"sku": "FRT", "description": "Freight – Denver delivery route", "qty": "1", "unit_price": "18.00"}
+      ],
+      "expect_route": "recorded", "expect_reason": "",
+      "note": "Clean digital invoice. Tax is printed as 0.00 (exempt), so the expected tax is 0, not null."
+    },
+    {
+      "case_id": "T02", "ord": 2, "email_no": 2, "file_name": "MeadowDairy_INV-2041.pdf",
+      "case_type": "normal", "supplier": "meadow", "render": "text",
+      "invoice_number": "INV-2041", "invoice_date": "2026-10-04", "due_date": "2026-10-19", "terms": "Net 15",
+      "account_no": "CK-0042", "po_number": "PO-5498",
+      "ship_to": "highlands",
+      "tax_rate": "0", "tax_label": "Tax",
+      "lines": [
+        {"sku": "WM-1G", "description": "Whole milk", "size": "1 gal", "qty": "24", "unit_price": "4.35"},
+        {"sku": "2P-1G", "description": "2% reduced-fat milk", "size": "1 gal", "qty": "12", "unit_price": "4.20"},
+        {"sku": "OAT-32", "description": "Oat milk, barista edition", "size": "32 oz", "qty": "36", "unit_price": "3.15"},
+        {"sku": "HC-HG", "description": "Heavy cream", "size": "1/2 gal", "qty": "6", "unit_price": "9.80"},
+        {"sku": "DLV", "description": "Delivery fee", "size": "", "qty": "1", "unit_price": "12.00"}
+      ],
+      "expect_route": "recorded", "expect_reason": "",
+      "note": "US date format 10/04/2026 = October 4 (the due date 10/19 confirms month first). Also prints an account number and a PO number next to the invoice number."
+    },
+    {
+      "case_id": "T03", "ord": 3, "email_no": 3, "file_name": "PackRight_INV-2036.pdf",
+      "case_type": "normal", "supplier": "packright", "render": "text",
+      "invoice_number": "INV-2036", "invoice_date": "2026-10-06", "due_date": "2026-11-05", "terms": "Net 30",
+      "customer_no": "C-10931", "ship_to": "larimer",
+      "tax_rate": "0.0825", "tax_label": "Sales tax 8.25%",
+      "lines": [
+        {"sku": "CUP-H08", "description": "8 oz hot cup, kraft, 1000/cs", "qty": "1", "uom": "CS", "unit_price": "72.00"},
+        {"sku": "CUP-H12", "description": "12 oz hot cup, kraft, 1000/cs", "qty": "3", "uom": "CS", "unit_price": "84.50"},
+        {"sku": "CUP-H16", "description": "16 oz hot cup, kraft, 1000/cs", "qty": "4", "uom": "CS", "unit_price": "96.00"},
+        {"sku": "LID-H80", "description": "Hot lid, fits 8 oz, 1000/cs", "qty": "1", "uom": "CS", "unit_price": "38.00"},
+        {"sku": "LID-H90", "description": "Hot lid, fits 12-20 oz, 1000/cs", "qty": "6", "uom": "CS", "unit_price": "41.25"},
+        {"sku": "SLV-K01", "description": "Cup sleeve, kraft, 1200/cs", "qty": "3", "uom": "CS", "unit_price": "46.80"},
+        {"sku": "CUP-C16", "description": "16 oz cold cup, PET, 1000/cs", "qty": "2", "uom": "CS", "unit_price": "88.00"},
+        {"sku": "CUP-C20", "description": "20 oz cold cup, PET, 1000/cs", "qty": "2", "uom": "CS", "unit_price": "97.50"},
+        {"sku": "LID-C98", "description": "Strawless sip lid, 98 mm, 1000/cs", "qty": "3", "uom": "CS", "unit_price": "52.00"},
+        {"sku": "STR-P23", "description": "Paper straw, wrapped, 3000/cs", "qty": "1", "uom": "CS", "unit_price": "64.00"},
+        {"sku": "CAR-4C", "description": "4-cup carrier, molded fiber, 300/cs", "qty": "1", "uom": "CS", "unit_price": "58.60"},
+        {"sku": "BAG-S06", "description": "#6 kraft bag, 500/bundle", "qty": "2", "uom": "BDL", "unit_price": "27.40"},
+        {"sku": "BAG-P12", "description": "Glassine pastry bag, 1000/cs", "qty": "1", "uom": "CS", "unit_price": "39.90"},
+        {"sku": "NAP-D01", "description": "Dinner napkin, 2-ply, 3000/cs", "qty": "2", "uom": "CS", "unit_price": "44.00"},
+        {"sku": "STK-W10", "description": "Wooden stirrer, 7 in, 10000/cs", "qty": "1", "uom": "CS", "unit_price": "31.50"},
+        {"sku": "GLV-N-M", "description": "Nitrile gloves, medium, 100/box", "qty": "10", "uom": "BX", "unit_price": "8.95"},
+        {"sku": "GLV-N-L", "description": "Nitrile gloves, large, 100/box", "qty": "6", "uom": "BX", "unit_price": "8.95"},
+        {"sku": "TWL-C02", "description": "C-fold paper towel, 2400/cs", "qty": "2", "uom": "CS", "unit_price": "36.75"},
+        {"sku": "LBL-D03", "description": "Day-of-week labels, 1000/roll", "qty": "4", "uom": "RL", "unit_price": "6.20"},
+        {"sku": "CTR-K32", "description": "32 oz kraft soup container, 500/cs", "qty": "1", "uom": "CS", "unit_price": "71.00"},
+        {"sku": "FRT", "description": "Freight", "qty": "1", "uom": "EA", "unit_price": "45.00"}
+      ],
+      "expect_route": "recorded", "expect_reason": "",
+      "note": "21 lines over two pages. Totals are only on page 2."
+    },
+    {
+      "case_id": "T04", "ord": 4, "email_no": 4, "file_name": "BrightClean_BC-2026-0412.pdf",
+      "case_type": "normal", "supplier": "brightclean", "render": "text",
+      "invoice_number": "BC-2026-0412", "invoice_date": "2026-10-01", "due_date": "2026-10-31", "terms": "Net 30",
+      "service_period": "September 1–30, 2026",
+      "tax_rate": "0", "tax_label": "Sales tax",
+      "lines": [
+        {"description": "Nightly janitorial – Larimer St store (22 visits)", "qty": "22", "unit": "visits", "unit_price": "58.00"},
+        {"description": "Nightly janitorial – Highlands store (22 visits)", "qty": "22", "unit": "visits", "unit_price": "52.00"},
+        {"description": "Nightly janitorial – Wash Park store (22 visits)", "qty": "22", "unit": "visits", "unit_price": "52.00"},
+        {"description": "Hood and grease trap cleaning – Larimer St, Sep 19", "qty": "3.5", "unit": "hours", "unit_price": "85.00"},
+        {"description": "Floor strip and wax – Highlands, Sep 26", "qty": "4", "unit": "hours", "unit_price": "75.00"}
+      ],
+      "expect_route": "recorded", "expect_reason": "",
+      "note": "Service invoice: hours and visits instead of products, one decimal quantity (3.5)."
+    },
+    {
+      "case_id": "T05", "ord": 5, "email_no": 4, "file_name": "BrightClean_Service_Menu_2027.pdf",
+      "case_type": "not_invoice", "supplier": "brightclean", "render": "brochure",
+      "expect_route": "not_invoice", "expect_reason": "",
+      "note": "Price list attached to the same email as T04. Has prices and a supplier name, but no invoice number, bill-to or amount due."
+    },
+    {
+      "case_id": "T06", "ord": 6, "email_no": 5, "file_name": "Scan_2026-10-09_0842.pdf",
+      "case_type": "scan", "supplier": "highland", "render": "scan_clean",
+      "invoice_number": "HB-10519", "invoice_date": "2026-10-09", "due_date": "2026-11-08", "terms": "Net 30",
+      "ship_to": "washpark",
+      "tax_rate": "0", "tax_label": "Sales tax (exempt – resale)",
+      "lines": [
+        {"sku": "ESP-CH5", "description": "Copper House Espresso Blend, 5 lb bag", "qty": "8", "unit_price": "62.50"},
+        {"sku": "ETH-YG5", "description": "Ethiopia Yirgacheffe single origin, 5 lb bag", "qty": "3", "unit_price": "74.00"},
+        {"sku": "CBR-CS5", "description": "Cold Brew Coarse Blend, 5 lb bag", "qty": "4", "unit_price": "58.00"},
+        {"sku": "FRT", "description": "Freight – Denver delivery route", "qty": "1", "unit_price": "18.00"}
+      ],
+      "expect_route": "recorded", "expect_reason": "",
+      "note": "Office-scanner copy: image only, no text layer. Extract from File returns no text, so this must go to the document-reading path."
+    },
+    {
+      "case_id": "T07", "ord": 7, "email_no": 6, "file_name": "IMG_4471.pdf",
+      "case_type": "scan", "supplier": "meadow", "render": "phone_photo",
+      "invoice_number": "INV-2058", "invoice_date": "2026-10-11", "due_date": "2026-10-26", "terms": "Net 15",
+      "account_no": "CK-0042", "po_number": "PO-5507",
+      "ship_to": "larimer",
+      "tax_rate": "0", "tax_label": "Tax",
+      "lines": [
+        {"sku": "WM-1G", "description": "Whole milk", "size": "1 gal", "qty": "24", "unit_price": "4.35"},
+        {"sku": "OAT-32", "description": "Oat milk, barista edition", "size": "32 oz", "qty": "48", "unit_price": "3.15"},
+        {"sku": "ALM-32", "description": "Almond milk, barista edition", "size": "32 oz", "qty": "12", "unit_price": "3.40"},
+        {"sku": "HH-HG", "description": "Half and half", "size": "1/2 gal", "qty": "8", "unit_price": "5.60"},
+        {"sku": "DLV", "description": "Delivery fee", "size": "", "qty": "1", "unit_price": "12.00"}
+      ],
+      "expect_route": "recorded", "expect_reason": "",
+      "note": "Phone photo of a paper invoice: tilted, uneven light, image only. 10/11/2026 is October 11 (due 10/26/2026, Net 15)."
+    },
+    {
+      "case_id": "T08", "ord": 8, "email_no": 7, "file_name": "PackRight_INV-2039.pdf",
+      "case_type": "anomaly", "supplier": "packright", "render": "text",
+      "invoice_number": "INV-2039", "invoice_date": "2026-10-13", "due_date": "2026-11-12", "terms": "Net 30",
+      "customer_no": "C-10931", "ship_to": "highlands",
+      "tax_rate": "0.0825", "tax_label": "Sales tax 8.25%",
+      "subtotal_override": "1420.00",
+      "lines": [
+        {"sku": "CUP-H12", "description": "12 oz hot cup, kraft, 1000/cs", "qty": "4", "uom": "CS", "unit_price": "84.50"},
+        {"sku": "CUP-H16", "description": "16 oz hot cup, kraft, 1000/cs", "qty": "4", "uom": "CS", "unit_price": "96.00"},
+        {"sku": "LID-H90", "description": "Hot lid, fits 12-20 oz, 1000/cs", "qty": "4", "uom": "CS", "unit_price": "41.25"},
+        {"sku": "NAP-D01", "description": "Dinner napkin, 2-ply, 3000/cs", "qty": "3", "uom": "CS", "unit_price": "44.00"},
+        {"sku": "CUP-C16", "description": "16 oz cold cup, PET, 1000/cs", "qty": "2", "uom": "CS", "unit_price": "88.00"},
+        {"sku": "FRT", "description": "Freight", "qty": "1", "uom": "EA", "unit_price": "45.00"}
+      ],
+      "expect_route": "needs_review", "expect_reason": "sum_mismatch",
+      "note": "The lines add up to 1,240.00 but the printed subtotal is 1,420.00 (digits swapped). Tax and total follow the wrong subtotal, so subtotal + tax = total still holds. The answer key keeps the printed numbers: an AI that quietly 'fixes' the subtotal fails."
+    },
+    {
+      "case_id": "T09", "ord": 9, "email_no": 8, "file_name": "BrightClean_BC-2026-0419.pdf",
+      "case_type": "anomaly", "supplier": "brightclean", "render": "text",
+      "invoice_number": "BC-2026-0419", "invoice_date": "2026-10-14", "due_date": "2026-09-14", "terms": "Net 30",
+      "service_period": "October 12–13, 2026",
+      "tax_rate": "0", "tax_label": "Sales tax",
+      "lines": [
+        {"description": "Window cleaning, inside and out – all 3 stores", "qty": "3", "unit": "stores", "unit_price": "145.00"},
+        {"description": "Carpet shampoo – Highlands seating area", "qty": "1", "unit": "job", "unit_price": "220.00"}
+      ],
+      "expect_route": "needs_review", "expect_reason": "due_before_invoice",
+      "note": "Due date printed as Sep 14, 2026, a month before the invoice date (Oct 14, Net 30). The key keeps the printed due date."
+    },
+    {
+      "case_id": "T10", "ord": 10, "email_no": 9, "file_name": "MeadowDairy_Invoice_Oct16.pdf",
+      "case_type": "anomaly", "supplier": "meadow", "render": "text",
+      "invoice_number": null, "invoice_date": "2026-10-16", "due_date": "2026-10-31", "terms": "Net 15",
+      "account_no": "CK-0042", "po_number": "PO-5512",
+      "ship_to": "washpark",
+      "tax_rate": "0", "tax_label": "Tax",
+      "lines": [
+        {"sku": "WM-1G", "description": "Whole milk", "size": "1 gal", "qty": "30", "unit_price": "4.35"},
+        {"sku": "2P-1G", "description": "2% reduced-fat milk", "size": "1 gal", "qty": "12", "unit_price": "4.20"},
+        {"sku": "OAT-32", "description": "Oat milk, barista edition", "size": "32 oz", "qty": "36", "unit_price": "3.15"},
+        {"sku": "DLV", "description": "Delivery fee", "size": "", "qty": "1", "unit_price": "12.00"}
+      ],
+      "expect_route": "needs_review", "expect_reason": "missing_invoice_number",
+      "note": "The 'Invoice #' field is printed empty. The account number (CK-0042) and PO number (PO-5512) are traps: neither is the invoice number, so the expected value is null."
+    },
+    {
+      "case_id": "T11", "ord": 11, "email_no": 10, "file_name": "HB-10482_reminder.pdf",
+      "case_type": "duplicate", "copy_of": "T01", "stamp": "PAYMENT REMINDER – copy of the invoice sent October 2, 2026",
+      "expect_route": "duplicate", "expect_reason": "",
+      "note": "Same invoice as T01 with a reminder stamp. Fields are identical to T01. Same supplier + same number + same total = duplicate."
+    },
+    {
+      "case_id": "T12", "ord": 12, "email_no": 11, "file_name": "PackRight_INV-2041.pdf",
+      "case_type": "duplicate_trap", "supplier": "packright", "render": "text",
+      "invoice_number": "INV-2041", "invoice_date": "2026-10-17", "due_date": "2026-11-16", "terms": "Net 30",
+      "customer_no": "C-10931", "ship_to": "washpark",
+      "tax_rate": "0.0825", "tax_label": "Sales tax 8.25%",
+      "lines": [
+        {"sku": "CUP-C16", "description": "16 oz cold cup, PET, 1000/cs", "qty": "3", "uom": "CS", "unit_price": "88.00"},
+        {"sku": "LID-C98", "description": "Strawless sip lid, 98 mm, 1000/cs", "qty": "3", "uom": "CS", "unit_price": "52.00"},
+        {"sku": "STR-P23", "description": "Paper straw, wrapped, 3000/cs", "qty": "1", "uom": "CS", "unit_price": "64.00"},
+        {"sku": "CAR-4C", "description": "4-cup carrier, molded fiber, 300/cs", "qty": "2", "uom": "CS", "unit_price": "58.60"}
+      ],
+      "expect_route": "recorded", "expect_reason": "",
+      "note": "Same invoice number as T02 (INV-2041) but from a different supplier. A duplicate check that only looks at the number would wrongly skip it."
+    }
+  ],
+  "emails": [
+    {"email_no": 1, "subject": "Invoice HB-10482 – Highland Bean Roasters", "body": "Hi, please find our invoice for the October 2 delivery attached. Thanks!", "attachments": ["T01"]},
+    {"email_no": 2, "subject": "Meadow Dairy invoice INV-2041", "body": "Invoice for your Highlands delivery is attached.", "attachments": ["T02"]},
+    {"email_no": 3, "subject": "Invoice INV-2036 from PackRight Packaging Supply", "body": "Attached is invoice INV-2036. Let us know if you have any questions.", "attachments": ["T03"]},
+    {"email_no": 4, "subject": "September cleaning invoice + 2027 service menu", "body": "Hi team, here is the September invoice. I also attached our 2027 service menu in case you want to add window cleaning.", "attachments": ["T04", "T05"]},
+    {"email_no": 5, "subject": "Invoice HB-10519 (scanned copy)", "body": "Our printer is acting up, so this one is a scan. Sorry about the quality.", "attachments": ["T06"]},
+    {"email_no": 6, "subject": "Invoice from today's delivery", "body": "Our driver took a photo of today's invoice. Paper copy was left with your barista.", "attachments": ["T07"]},
+    {"email_no": 7, "subject": "Invoice INV-2039 – PackRight", "body": "Please see attached invoice for your Highlands order.", "attachments": ["T08"]},
+    {"email_no": 8, "subject": "Invoice BC-2026-0419 – windows and carpet", "body": "Thanks for having us out this week. Invoice attached.", "attachments": ["T09"]},
+    {"email_no": 9, "subject": "Meadow Dairy – Oct 16 delivery", "body": "Invoice for the Wash Park delivery is attached.", "attachments": ["T10"]},
+    {"email_no": 10, "subject": "Reminder: invoice HB-10482 due Nov 1", "body": "Friendly reminder that invoice HB-10482 is due on November 1. A copy is attached.", "attachments": ["T11"]},
+    {"email_no": 11, "subject": "Invoice INV-2041 – PackRight Packaging Supply", "body": "Attached is invoice INV-2041 for your Wash Park order.", "attachments": ["T12"]}
+  ]
+}

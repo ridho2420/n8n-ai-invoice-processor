@@ -1,0 +1,2517 @@
+{
+  "name": "Copper Kettle – Invoice Processor",
+  "nodes": [
+    {
+      "id": "235d3cdf-bc88-4bac-9430-24d134007e87",
+      "name": "New Invoice Email",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "event": "messageReceived",
+        "filters": {
+          "q": "in:inbox has:attachment filename:pdf -from:me",
+          "readStatus": "both"
+        },
+        "options": {
+          "dataPropertyAttachmentsPrefixName": "attachment_",
+          "downloadAttachments": true
+        },
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false
+      }
+    },
+    {
+      "id": "fde28867-9e37-4b87-92b8-245bed194c13",
+      "name": "Split Attachments",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// One item per PDF attachment, in the same shape as a test file.\n// Other attachments are skipped. An email without a PDF produces no item.\nconst out = [];\nfor (const item of $input.all()) {\n  const m = item.json;\n  const from = (m.from && m.from.value && m.from.value[0]) || {};\n  for (const [key, bin] of Object.entries(item.binary || {})) {\n    const name = bin.fileName || key;\n    const isPdf = bin.mimeType === 'application/pdf' || /\\.pdf$/i.test(name);\n    if (!isPdf) continue;\n    out.push({\n      json: {\n        source: 'gmail',\n        run_id: null,\n        case_id: null,\n        file_id: null,\n        file_name: name,\n        email_id: m.id || null,\n        thread_id: m.threadId || null,\n        sender: from.address || (m.from && m.from.text) || '',\n        sender_name: from.name || '',\n        subject: m.subject || '',\n        received_at: m.date ? new Date(m.date).toISOString() : new Date().toISOString(),\n        prior_dup_keys: [],\n      },\n      binary: { data: bin },\n    });\n  }\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "cfad9d29-32d7-476e-8c71-969c1621ed7d",
+      "name": "Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        160
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Settings for every invoice (Project 3 design doc, sections 3, 3b and 4).\n// The eval run records MODEL and PROMPT_VERSION, so change them only on purpose.\nconst MODEL = 'gemini-3.5-flash-lite';\nconst PROMPT_VERSION = 'p3-prompt-v2'; // v2 (28 Oct): rule 8, supplier's full name (R1: T04, T09)\nconst MAX_OUTPUT_TOKENS = 8192;\n\n// Checks done by code after the AI has read the invoice (stage 4).\nconst HOME_CURRENCY = 'USD';\nconst MONEY_TOLERANCE = 0.01; // differences up to 1 cent are rounding, not an error\nconst TIMEZONE = 'America/Denver'; // \"today\" for the future-date check\n\nconst CATEGORIES = [\n  { code: 'coffee_tea', name: 'Coffee & Tea', definition: 'Roasted coffee beans, ground coffee, cold brew packs and tea.' },\n  { code: 'dairy', name: 'Dairy & Milk Alternatives', definition: 'Milk, cream, half and half, and plant-based milks such as oat, almond or soy.' },\n  { code: 'food', name: 'Food & Bakery', definition: 'Food sold to customers or used to make it: pastries, baked goods, sandwiches, food ingredients. Never the bags or boxes food goes in.' },\n  { code: 'packaging', name: 'To-Go Packaging & Disposables', definition: 'Anything handed to a customer with an order: cups, lids, sleeves, straws, stirrers, napkins, carriers, bags and food containers.' },\n  { code: 'supplies', name: 'Kitchen & Cleaning Supplies', definition: 'Items staff use up that customers never take: gloves, paper towels, food-safety labels, cleaning chemicals, trash bags.' },\n  { code: 'cleaning_services', name: 'Cleaning & Maintenance Services', definition: 'Work billed by a service company: janitorial visits, hood and grease trap cleaning, floor care, window and carpet cleaning.' },\n  { code: 'freight', name: 'Freight & Delivery Fees', definition: 'Delivery, freight or shipping charges on any invoice.' },\n];\n\n// Stores and the words that identify them in a delivery address or a line description.\n// \"shared\" = a line for several stores; reports split it equally.\nconst BRANCHES = [\n  { code: 'larimer', name: 'Larimer St', keywords: ['larimer'] },\n  { code: 'highlands', name: 'Highlands', keywords: ['highlands', '32nd ave'] },\n  { code: 'washpark', name: 'Wash Park', keywords: ['wash park', 'gaylord'] },\n  { code: 'shared', name: 'Shared', keywords: [] },\n];\nconst SHARED_PHRASES = ['all 3 stores', 'all three stores', 'all stores', 'all locations'];\n\n// QuickBooks Online (stage 6b): sandbox company, IDs from design doc section 5b.\n// Vendors are matched by name at run time and never created by the workflow.\nconst QUICKBOOKS = {\n  base_url: 'https://sandbox-quickbooks.api.intuit.com/v3/company/YOUR_QUICKBOOKS_COMPANY_ID',\n  minor_version: '75',\n  accounts: { // cost category -> expense account\n    coffee_tea: '1150040000', dairy: '1150040001', food: '1150040002', packaging: '1150040003',\n    cleaning_services: '1150040004', supplies: '1150040005', freight: '1150040006',\n  },\n  tax_account: '1150040007', // Sales Tax Paid\n  classes: { larimer: '741030', highlands: '741031', washpark: '741032', shared: '741033' }, // store -> Class\n  doc_number_max: 21, // QuickBooks limit for the bill number\n};\n\nconst SYSTEM_PROMPT = [\n  'You read one supplier document for the accounts payable team of Copper Kettle Café',\n  'and copy what is printed into JSON. You never calculate, correct or complete',\n  'anything: code checks the numbers after you.',\n  '',\n  '1. is_invoice is true only for a bill that asks Copper Kettle to pay for goods or',\n  '   services (it shows an amount due). A copy or reminder that contains the invoice',\n  '   itself counts. Price lists, menus, quotes and brochures are false. If false, set',\n  '   every other field to null and line_items to [].',\n  '2. Copy exactly what is printed. If the numbers on the document do not agree with',\n  '   each other, still copy them as printed. Never fix a subtotal, tax, total or',\n  '   line amount.',\n  '3. Use null for anything that is not printed. Do not guess. PO numbers, account',\n  '   numbers and customer numbers are not invoice numbers: if the invoice number',\n  '   field is empty, invoice_number is null.',\n  '4. Dates as YYYY-MM-DD. US suppliers write the month first: 10/04/2026 is 2026-10-04.',\n  '5. Amounts as plain numbers, without currency symbols or thousands separators.',\n  '   A tax printed as 0.00 is 0, not null. currency is the 3-letter code.',\n  '6. Every row of the item table is one line item, including freight and delivery',\n  '   fees, in the printed order. Read every page. Subtotal, tax and total rows are',\n  '   not line items.',\n  '7. ship_to is the delivery address block only (labelled Ship to, Deliver to or',\n  '   similar), copied on one line. Bill to, Sold to and Client blocks are the head',\n  '   office billing address, not a delivery address. No delivery block: null.',\n  '8. supplier_name is the supplier\\'s full business name. If the logo shows only a short',\n  '   name and the full name is printed elsewhere (for example after \"payable to\" or in',\n  '   the footer), copy that full name.',\n  '9. category: pick one code per line from the list below, using its definition.',\n  '   If none fits, use null. Never invent a new code.',\n  '',\n  'Categories:',\n  ...CATEGORIES.map(c => '- ' + c.code + ' (' + c.name + '): ' + c.definition),\n].join('\\n');\n\nreturn $input.all().map(item => ({\n  json: {\n    ...item.json,\n    config: {\n      model: MODEL,\n      prompt_version: PROMPT_VERSION,\n      max_output_tokens: MAX_OUTPUT_TOKENS,\n      home_currency: HOME_CURRENCY,\n      money_tolerance: MONEY_TOLERANCE,\n      timezone: TIMEZONE,\n      categories: CATEGORIES,\n      branches: BRANCHES,\n      shared_phrases: SHARED_PHRASES,\n      quickbooks: QUICKBOOKS,\n      system_prompt: SYSTEM_PROMPT,\n    },\n  },\n  binary: item.binary,\n}));\n"
+      }
+    },
+    {
+      "id": "e2d6f986-0ba5-4d4f-b104-f67e7d3f0ccb",
+      "name": "When Called by Eval Runner",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        240
+      ],
+      "parameters": {
+        "inputSource": "workflowInputs",
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "run_id",
+              "type": "string"
+            },
+            {
+              "name": "case_id",
+              "type": "string"
+            },
+            {
+              "name": "file_id",
+              "type": "string"
+            },
+            {
+              "name": "file_name",
+              "type": "string"
+            },
+            {
+              "name": "prior_dup_keys",
+              "type": "array"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "065323e5-3dd2-482a-bb15-399cff6b2f83",
+      "name": "Test File Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        340
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Requests from the Eval Runner (or the dev door), cleaned up before the download.\n// prior_dup_keys = earlier documents of the same eval run (for the duplicate check);\n// accepted as a list or as JSON text.\nconst list = (v) => {\n  if (Array.isArray(v)) return v;\n  if (typeof v === 'string' && v.trim()) {\n    try { const p = JSON.parse(v); return Array.isArray(p) ? p : []; } catch (e) { return []; }\n  }\n  return [];\n};\nreturn $input.all().map(i => {\n  const r = i.json;\n  return { json: {\n    source: r.source || 'eval',\n    run_id: r.run_id ? String(r.run_id) : null,\n    case_id: r.case_id ? String(r.case_id) : null,\n    file_id: String(r.file_id || ''),\n    file_name: String(r.file_name || ''),\n    prior_dup_keys: list(r.prior_dup_keys),\n  } };\n});\n"
+      }
+    },
+    {
+      "id": "bffec0c3-499d-4f0d-9e0a-50c561b58961",
+      "name": "Dev: Read 3 Test Files",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        460
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "37a0fede-d6a2-4b8c-928f-464232771f10",
+      "name": "List Test Files",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        240,
+        460
+      ],
+      "parameters": {
+        "resource": "fileFolder",
+        "operation": "search",
+        "searchMethod": "name",
+        "queryString": ".pdf",
+        "returnAll": true,
+        "filter": {
+          "folderId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "YOUR_TEST_SET_FOLDER_ID"
+          },
+          "whatToSearch": "files"
+        },
+        "options": {
+          "fields": [
+            "id",
+            "name"
+          ]
+        }
+      }
+    },
+    {
+      "id": "4d56dcdf-9394-4277-8210-0c58a1924665",
+      "name": "Pick Dev Files",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        460
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Build-time check only: a text PDF, a scan and the brochure.\n// Disable this door once the Eval Runner exists.\nconst DEV_FILES = { 'HB-10482.pdf': 'T01', 'Scan_2026-10-09_0842.pdf': 'T06', 'BrightClean_Service_Menu_2027.pdf': 'T05' };\nconst run = 'dev-' + $now.toFormat('yyyyLLdd-HHmm');\nreturn $input.all()\n  .filter(i => DEV_FILES[i.json.name])\n  .map(i => ({ json: { source: 'dev', run_id: run, case_id: DEV_FILES[i.json.name], file_id: i.json.id, file_name: i.json.name, prior_dup_keys: [] } }));"
+      }
+    },
+    {
+      "id": "ca53c20b-8387-4024-a558-0db114298a3a",
+      "name": "Download Test File",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        960,
+        340
+      ],
+      "parameters": {
+        "resource": "file",
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $json.file_id }}"
+        },
+        "options": {
+          "binaryPropertyName": "data"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "3f2ba5ff-b694-46fe-8e7b-dffc47d621b2",
+      "name": "Shape Test Item",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        340
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Same item shape as an email attachment, so everything after this point\n// runs exactly the same code for test files and real emails.\nconst requests = $('Test File Request').all();\nreturn $input.all().map((item, i) => ({\n  json: {\n    ...requests[i].json,\n    email_id: null,\n    thread_id: null,\n    sender: '',\n    sender_name: '',\n    subject: '',\n    received_at: new Date().toISOString(),\n  },\n  binary: { data: item.binary.data },\n}));"
+      }
+    },
+    {
+      "id": "4e93d862-5fdd-41e6-8cfa-a8db5095bd79",
+      "name": "Prepare PDF",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        160
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Turns the PDF into base64 for Gemini and checks that it really is a PDF.\nconst out = [];\nconst items = $input.all();\nfor (let i = 0; i < items.length; i++) {\n  const buf = await this.helpers.getBinaryDataBuffer(i, 'data');\n  out.push({\n    json: {\n      ...items[i].json,\n      pdf_bytes: buf.length,\n      pdf_header_ok: buf.subarray(0, 5).toString('latin1') === '%PDF-',\n      pdf_base64: buf.toString('base64'),\n    },\n    binary: items[i].binary,\n  });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "6fe780e7-d24c-44f6-9d5d-9607be7707ef",
+      "name": "Extract PDF Text",
+      "type": "n8n-nodes-base.readPDF",
+      "typeVersion": 1,
+      "position": [
+        1920,
+        160
+      ],
+      "parameters": {
+        "binaryPropertyName": "data"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "80f9d28a-b859-453e-806a-2952d914956a",
+      "name": "Read Path",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2160,
+        160
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Marks each PDF as text_layer or image_only (scan or photo), for the log and the eval.\n// Gemini reads the PDF itself either way; the extracted text is not sent to the AI.\n// Also builds the Gemini request: system prompt, the PDF, and the locked JSON schema.\nconst prepared = $('Prepare PDF').all();\nconst out = [];\n$input.all().forEach((it, i) => {\n  const src = prepared[i].json;\n  const cfg = src.config;\n  const text = String(it.json.text || '');\n  const chars = text.replace(/\\s+/g, '').length;\n  const readPath = it.json.error ? 'extract_failed' : (chars >= 50 ? 'text_layer' : 'image_only');\n\n  const nStr = (description) => (description ? { type: 'STRING', nullable: true, description } : { type: 'STRING', nullable: true });\n  const nNum = { type: 'NUMBER', nullable: true };\n  const lineProps = ['description', 'quantity', 'unit_price', 'amount', 'category'];\n  const topProps = ['is_invoice', 'invoice_number', 'supplier_name', 'invoice_date', 'due_date', 'currency',\n    'subtotal', 'tax', 'total', 'ship_to', 'line_items'];\n  const schema = {\n    type: 'OBJECT',\n    properties: {\n      is_invoice: { type: 'BOOLEAN' },\n      invoice_number: nStr(),\n      supplier_name: nStr(),\n      invoice_date: nStr('YYYY-MM-DD'),\n      due_date: nStr('YYYY-MM-DD'),\n      currency: nStr('3-letter code, for example USD'),\n      subtotal: nNum,\n      tax: nNum,\n      total: nNum,\n      ship_to: nStr('Delivery address as printed, on one line'),\n      line_items: {\n        type: 'ARRAY',\n        items: {\n          type: 'OBJECT',\n          properties: {\n            description: { type: 'STRING' },\n            quantity: nNum,\n            unit_price: nNum,\n            amount: nNum,\n            category: { type: 'STRING', nullable: true, enum: cfg.categories.map(c => c.code) },\n          },\n          required: lineProps,\n          propertyOrdering: lineProps,\n        },\n      },\n    },\n    required: topProps,\n    propertyOrdering: topProps,\n  };\n\n  const request = {\n    systemInstruction: { parts: [{ text: cfg.system_prompt }] },\n    contents: [{ role: 'user', parts: [\n      { inlineData: { mimeType: 'application/pdf', data: src.pdf_base64 } },\n      { text: 'Read this document.' },\n    ] }],\n    generationConfig: {\n      temperature: 0,\n      maxOutputTokens: cfg.max_output_tokens,\n      responseMimeType: 'application/json',\n      responseSchema: schema,\n    },\n  };\n\n  const { pdf_base64, ...rest } = src;\n  out.push({\n    json: {\n      ...rest,\n      read_path: readPath,\n      text_chars: chars,\n      pages: it.json.numpages ?? null,\n      read_started_at: Date.now(),\n      gemini_request: request,\n    },\n    binary: prepared[i].binary,\n  });\n});\nreturn out;"
+      }
+    },
+    {
+      "id": "edb5cca8-1a2a-478c-b7a9-dad838ec7515",
+      "name": "Read Invoice (Gemini)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        2400,
+        160
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/{{ $json.config.model }}:generateContent",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googlePalmApi",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.gemini_request) }}",
+        "options": {
+          "timeout": 120000,
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 4000
+            }
+          }
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "df8f45bc-52aa-44b1-a604-c83ab86b1cee",
+      "name": "Parse Reading",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        160
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Turns Gemini's reply into the raw reading. No checks on the numbers yet: stage 4 does that.\n// If Gemini still failed after 3 attempts, the item carries on marked ai_failed,\n// so it is logged and reported instead of disappearing.\nconst ctx = $('Read Path').item.json;\nconst r = $json;\nconst usage = r.usageMetadata || {};\nlet reading = null;\nlet aiError = null;\nlet finishReason = null;\n\nif (r.error) {\n  const e = r.error;\n  const msg = (e && (e.message || e.description)) || (typeof e === 'string' ? e : 'unknown error');\n  aiError = ('Gemini request failed: ' + msg).slice(0, 500);\n} else {\n  const cand = (r.candidates || [])[0] || {};\n  finishReason = cand.finishReason || null;\n  const text = ((cand.content && cand.content.parts) || []).map(p => p.text || '').join('');\n  if (!text) {\n    aiError = 'Gemini returned no text (' + (cand.finishReason || (r.promptFeedback && r.promptFeedback.blockReason) || 'no reason given') + ')';\n  } else {\n    try { reading = JSON.parse(text); }\n    catch (e) { aiError = 'Gemini reply was not valid JSON (finishReason ' + (cand.finishReason || 'unknown') + ')'; }\n  }\n  if (reading !== null && (typeof reading !== 'object' || Array.isArray(reading))) {\n    reading = null;\n    aiError = 'Gemini reply was JSON but not an object';\n  }\n}\n\nconst { gemini_request, ...rest } = ctx;\nreturn {\n  json: {\n    ...rest,\n    reading,\n    ai_failed: !reading,\n    ai_error: aiError,\n    finish_reason: finishReason,\n    model_version: r.modelVersion || ctx.config.model,\n    tokens_in: usage.promptTokenCount ?? null,\n    tokens_out: usage.candidatesTokenCount ?? null,\n    tokens_thinking: usage.thoughtsTokenCount ?? null,\n    read_ms: Date.now() - ctx.read_started_at,\n  },\n  binary: $('Read Path').item.binary,\n};\n"
+      }
+    },
+    {
+      "id": "8db58462-04c7-4ee0-b8bd-7be81fc30859",
+      "name": "Sticky Note 4150132b",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -50,
+        -200
+      ],
+      "parameters": {
+        "content": "## 1. Intake\nThree doors, one item shape:\n- **Gmail**: new email with a PDF attachment (one item per PDF). An email whose Gmail ID is already in p3_processing_log is skipped, so no email is processed twice.\n- **Eval Runner**: a test file from Drive `test-set`\n- **Dev**: 3 test files, for building only",
+        "color": 7,
+        "width": 1420,
+        "height": 810
+      }
+    },
+    {
+      "id": "725bc1dd-fb49-446e-84d1-2ce4c7fdb9ab",
+      "name": "Sticky Note a3f51228",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1395,
+        -110
+      ],
+      "parameters": {
+        "content": "## Config\nModel, prompt version, cost categories and stores. The eval records the model and prompt version of every run.",
+        "color": 5,
+        "width": 220,
+        "height": 420
+      }
+    },
+    {
+      "id": "78f1f847-5912-456e-97bf-8c0fd8b03dad",
+      "name": "Sticky Note 3c33d305",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1630,
+        10
+      ],
+      "parameters": {
+        "content": "## 2. Read the invoice\nThe AI reads the PDF itself (text PDFs and scans alike) and copies what is printed into a locked JSON format. It never calculates or corrects: code checks the numbers in stage 4.\n`Read Path` notes whether the PDF has a text layer or is an image, for the log and the eval.",
+        "color": 4,
+        "width": 1260,
+        "height": 420
+      }
+    },
+    {
+      "id": "9c7e53ae-8d45-4df7-8242-793e2e72e81d",
+      "name": "Check & Allocate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2960,
+        160
+      ],
+      "parameters": {
+        "jsCode": "// Stage 4: code checks what the AI read, then decides the store (branch) of every line.\n// The AI only copied what is printed. Every number is recalculated here, and every problem\n// becomes a reason code (design doc, section 4). Any reason sends the invoice to review.\n// Duplicates are decided in stage 5 (Decide Route), with the dup_key built here.\n\n// ---- allocate.js (criteria p3-v2): branch by rule, category checked against the list ----\nfunction branchesIn(text, cfg) {\n  const t = String(text || '').toLowerCase();\n  return Object.entries(cfg.branches)\n    .filter(([, b]) => b.keywords.some((k) => t.includes(k)))\n    .map(([code]) => code);\n}\nfunction defaultBranch(shipTo, cfg) {\n  const found = branchesIn(shipTo, cfg);\n  return found.length === 1 ? found[0] : null;\n}\nfunction lineBranch(description, fallback, cfg) {\n  const t = String(description || '').toLowerCase();\n  if (cfg.sharedPhrases.some((p) => t.includes(p))) return 'shared';\n  const found = branchesIn(t, cfg);\n  if (found.length > 1) return 'shared';\n  if (found.length === 1) return found[0];\n  return fallback || 'unassigned';\n}\nfunction allocate(invoice, cfg) {\n  const shipToBranch = defaultBranch(invoice.ship_to, cfg);\n  const lines = (invoice.line_items || []).map((li) => {\n    const category = li.category ?? null;\n    return {\n      branch: lineBranch(li.description, shipToBranch, cfg),\n      category,\n      category_ok: category !== null && cfg.categories.includes(category),\n    };\n  });\n  const reasons = [];\n  if (lines.some((l) => l.branch === 'unassigned')) reasons.push('branch_unknown');\n  if (lines.some((l) => !l.category_ok)) reasons.push('uncategorized_line');\n  return { ship_to_branch: shipToBranch, lines, reasons };\n}\n\n// ---- reading the AI output safely ----\nconst text = (v) => { const s = String(v ?? '').trim(); return s ? s : null; };\nconst num = (v) => {\n  if (v === null || v === undefined || v === '') return null;\n  const n = typeof v === 'number' ? v : Number(String(v).replace(/[$,\\s]/g, ''));\n  return Number.isFinite(n) ? n : null;\n};\nconst isoDate = (v) => { // a real calendar date written YYYY-MM-DD, otherwise null\n  const s = String(v ?? '').trim();\n  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(s)) return null;\n  const d = new Date(s + 'T00:00:00Z');\n  return !isNaN(d) && d.toISOString().slice(0, 10) === s ? s : null;\n};\nconst cents = (n) => Math.round(n * 100) / 100;\nconst differs = (a, b, tol) => Math.abs(a - b) > tol + 1e-9;\n\n// ---- duplicate key: same supplier + same invoice number, written loosely ----\nconst SUFFIXES = ['llc', 'inc', 'co', 'company', 'corp', 'ltd'];\nconst normSupplier = (s) => String(s || '').normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase()\n  .replace(/['\\u2019]/g, '').replace(/[^a-z0-9]+/g, ' ').trim().split(' ')\n  .filter((w) => w && !SUFFIXES.includes(w)).join(' ');\nconst normNumber = (s) => String(s || '').toUpperCase().replace(/[\\s#]/g, '');\n\nconst out = [];\nfor (const item of $input.all()) {\n  const j = item.json;\n  const cfg = j.config;\n  const tol = cfg.money_tolerance;\n  const allocCfg = {\n    branches: Object.fromEntries(cfg.branches.filter((b) => b.keywords.length).map((b) => [b.code, { name: b.name, keywords: b.keywords }])),\n    sharedPhrases: cfg.shared_phrases,\n    categories: cfg.categories.map((c) => c.code),\n  };\n  const base = { ...j, check_status: null, invoice: null, allocation: null, dup_key: null, reasons: [], details: {} };\n\n  // AI failed: nothing to check. Stage 7 logs it and tells the team.\n  if (j.ai_failed || !j.reading) {\n    out.push({ json: { ...base, check_status: 'error', error_step: 'read', error_message: j.ai_error || 'No reading' }, binary: item.binary });\n    continue;\n  }\n  const r = j.reading;\n  if (r.is_invoice !== true) {\n    out.push({ json: { ...base, check_status: 'not_invoice' }, binary: item.binary });\n    continue;\n  }\n\n  // What the AI read, cleaned up (types only, never corrected).\n  const inv = {\n    invoice_number: text(r.invoice_number),\n    supplier: text(r.supplier_name),\n    invoice_date: isoDate(r.invoice_date),\n    due_date: isoDate(r.due_date),\n    currency: text(r.currency) ? text(r.currency).toUpperCase() : null,\n    subtotal: num(r.subtotal),\n    tax: num(r.tax),\n    total: num(r.total),\n    ship_to: text(r.ship_to),\n    line_items: (Array.isArray(r.line_items) ? r.line_items : []).map((li, n) => ({\n      line_no: n + 1,\n      description: text(li && li.description) || '',\n      quantity: num(li && li.quantity),\n      unit_price: num(li && li.unit_price),\n      amount: num(li && li.amount),\n      category: text(li && li.category),\n    })),\n  };\n  const lines = inv.line_items;\n  const reasons = [];\n  const details = {};\n  const flag = (code, info) => { reasons.push(code); if (info) details[code] = info; };\n\n  // Required fields\n  if (!inv.invoice_number) flag('missing_invoice_number', { field: 'invoice number' });\n  if (!inv.supplier) flag('missing_supplier', { field: 'supplier name' });\n  if (!inv.invoice_date) flag('missing_invoice_date', { field: 'invoice date', printed: r.invoice_date ?? null });\n  if (inv.total === null) flag('missing_total', { field: 'total' });\n  if (!lines.length) flag('missing_line_items', { field: 'line items' });\n\n  // Each line: quantity x unit price = amount (a missing amount also needs a person)\n  const badLines = lines.filter((l) => l.amount === null\n    || (l.quantity !== null && l.unit_price !== null && differs(l.quantity * l.unit_price, l.amount, tol)))\n    .map((l) => ({ line_no: l.line_no, description: l.description, quantity: l.quantity, unit_price: l.unit_price,\n      expected: l.quantity !== null && l.unit_price !== null ? cents(l.quantity * l.unit_price) : null, printed: l.amount }));\n  if (badLines.length) flag('line_math_mismatch', { lines: badLines });\n\n  // Lines add up to the subtotal; subtotal + tax = total\n  const linesTotal = cents(lines.reduce((s, l) => s + (l.amount ?? 0), 0));\n  if (lines.length && inv.subtotal !== null && differs(linesTotal, inv.subtotal, tol)) {\n    flag('sum_mismatch', { lines_total: linesTotal, subtotal: inv.subtotal, difference: cents(Math.abs(linesTotal - inv.subtotal)) });\n  }\n  const before = inv.subtotal !== null ? inv.subtotal : (lines.length ? linesTotal : null);\n  if (inv.total !== null && before !== null && differs(before + (inv.tax ?? 0), inv.total, tol)) {\n    flag('total_mismatch', { subtotal: before, tax: inv.tax ?? 0, expected: cents(before + (inv.tax ?? 0)), printed: inv.total });\n  }\n\n  // Dates and currency\n  const today = $now.setZone(cfg.timezone).toISODate();\n  if (inv.invoice_date && inv.due_date && inv.due_date < inv.invoice_date) {\n    flag('due_before_invoice', { due_date: inv.due_date, invoice_date: inv.invoice_date });\n  }\n  if (inv.invoice_date && inv.invoice_date > today) flag('future_date', { invoice_date: inv.invoice_date, today });\n  if (inv.currency && inv.currency !== cfg.home_currency) flag('currency_not_usd', { currency: inv.currency });\n\n  // Branch per line (rule) and category check (AI chose, code checks)\n  const alloc = allocate(inv, allocCfg);\n  if (alloc.reasons.includes('branch_unknown')) {\n    const un = lines.filter((l, n) => alloc.lines[n].branch === 'unassigned');\n    flag('branch_unknown', { lines: un.length, amount: cents(un.reduce((s, l) => s + (l.amount ?? 0), 0)) });\n  }\n  if (alloc.reasons.includes('uncategorized_line')) {\n    const un = lines.filter((l, n) => !alloc.lines[n].category_ok);\n    flag('uncategorized_line', { lines: un.length, amount: cents(un.reduce((s, l) => s + (l.amount ?? 0), 0)),\n      examples: un.slice(0, 3).map((l) => l.description) });\n  }\n\n  const dupKey = inv.supplier && inv.invoice_number ? normSupplier(inv.supplier) + '|' + normNumber(inv.invoice_number) : null;\n  out.push({\n    json: {\n      ...base,\n      check_status: 'invoice',\n      invoice: { ...inv, lines_total: linesTotal },\n      allocation: { ship_to_branch: alloc.ship_to_branch, lines: alloc.lines.map(({ branch, category }) => ({ branch, category })) },\n      dup_key: dupKey,\n      reasons,\n      details,\n    },\n    binary: item.binary,\n  });\n}\n\n// One Airtable search per email finds earlier invoices for all its PDFs (stage 5, email only).\nconst keys = [...new Set(out.map((o) => o.json.dup_key).filter(Boolean))];\nconst formula = keys.length\n  ? 'OR(' + keys.map((k) => '{Dup key}=\"' + k.replace(/[\"\\\\]/g, '\\\\$&') + '\"').join(',') + ')'\n  : 'FALSE()';\nfor (const o of out) o.json.dup_lookup_formula = formula;\nreturn out;\n",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "8ba191fd-d491-4082-9953-976eceaf3125",
+      "name": "Test File?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3200,
+        160
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "test-file",
+              "leftValue": "={{ $json.source }}",
+              "operator": {
+                "operation": "notEquals",
+                "type": "string"
+              },
+              "rightValue": "gmail"
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "ee980667-04b9-4e3e-8fbb-8223fa5dc9e7",
+      "name": "Find Earlier Invoices",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.2,
+      "position": [
+        3440,
+        320
+      ],
+      "parameters": {
+        "authentication": "airtableTokenApi",
+        "base": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_AIRTABLE_BASE_ID"
+        },
+        "filterByFormula": "={{ $json.dup_lookup_formula }}",
+        "operation": "search",
+        "options": {
+          "fields": [
+            "Invoice",
+            "Dup key",
+            "Total",
+            "Status",
+            "Received at"
+          ]
+        },
+        "resource": "record",
+        "returnAll": true,
+        "table": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_INVOICES_TABLE_ID"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "61972acf-88dc-4d7f-b3ef-e4454797bece",
+      "name": "Decide Route",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3680,
+        160
+      ],
+      "parameters": {
+        "jsCode": "// Stage 5: one final route per document: error, not_invoice, duplicate, needs_review or recorded.\n// Earlier invoices to compare with:\n// - real email: records found in Airtable by \"Find Earlier Invoices\" (any status)\n// - test file: the earlier documents of the same eval run, sent by the Eval Runner\n// Same supplier + same number + same total = duplicate (nothing is recorded again).\n// Same supplier + same number but a different total = needs_review (maybe a corrected invoice).\nconst items = $('Check & Allocate').all();\nconst isTest = items[0].json.source !== 'gmail';\nconst tolOf = (j) => (j.config && j.config.money_tolerance) || 0.01;\nconst toNum = (v) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));\n\nlet known = [];\nif (isTest) {\n  const prior = items[0].json.prior_dup_keys;\n  known = (Array.isArray(prior) ? prior : [])\n    .filter((p) => p && p.dup_key)\n    .map((p) => ({ dup_key: String(p.dup_key), total: toNum(p.total), ref: p.case_id ? String(p.case_id) : 'earlier test file', recorded_at: null, where: 'this eval run' }));\n} else {\n  known = $input.all().map((i) => i.json).filter((r) => r && typeof r.id === 'string' && r.id.startsWith('rec'))\n    .map((r) => {\n      const f = r.fields || r;\n      return { dup_key: String(f['Dup key'] || ''), total: toNum(f['Total']), ref: r.id, label: f['Invoice'] || null,\n        recorded_at: f['Received at'] || null, status: f['Status'] || null, where: 'airtable' };\n    })\n    .filter((k) => k.dup_key);\n}\n\nconst earlierFound = known.length;\nconst out = [];\nitems.forEach((item) => {\n  const j = item.json;\n  const reasons = [...(j.reasons || [])];\n  const details = { ...(j.details || {}) };\n  let route;\n  let duplicateOf = null;\n\n  if (j.check_status === 'error') route = 'error';\n  else if (j.check_status === 'not_invoice') route = 'not_invoice';\n  else {\n    const match = j.dup_key ? known.find((k) => k.dup_key === j.dup_key) : null;\n    const total = j.invoice ? j.invoice.total : null;\n    if (match && total !== null && match.total !== null && Math.abs(total - match.total) <= tolOf(j) + 1e-9) {\n      route = 'duplicate';\n      duplicateOf = match;\n    } else {\n      if (match) {\n        reasons.push('duplicate_amount_differs');\n        details.duplicate_amount_differs = { earlier: match, earlier_total: match.total, this_total: total };\n      }\n      route = reasons.length ? 'needs_review' : 'recorded';\n    }\n    // Two copies in the same email or batch: the second one is compared with the first.\n    if ((route === 'recorded' || route === 'needs_review') && j.dup_key) {\n      known.push({ dup_key: j.dup_key, total, ref: j.case_id || j.file_name, recorded_at: null, where: 'this execution' });\n    }\n  }\n\n  out.push({\n    json: { ...j, route, reasons, details, duplicate_of: duplicateOf, earlier_found: earlierFound },\n    binary: item.binary,\n  });\n});\nreturn out;\n",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "11f7e002-1a43-474d-965b-5e5422fa7f7f",
+      "name": "Eval Run?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3920,
+        160
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "eval-run",
+              "leftValue": "={{ $json.source }}",
+              "operator": {
+                "operation": "notEquals",
+                "type": "string"
+              },
+              "rightValue": "gmail"
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "c5e9b10f-06a0-44f0-af18-c52194101200",
+      "name": "Eval Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4160,
+        60
+      ],
+      "parameters": {
+        "jsCode": "// Test files stop here: no Drive, Airtable, QuickBooks or Slack.\n// This item goes back to the Eval Runner, which checks it against the answer key.\n// dup_key and total let the runner pass this document on as an \"earlier invoice\"\n// to the next cases of the same run (only if it would have been recorded).\nreturn $input.all().map((item) => {\n  const j = item.json;\n  return {\n    json: {\n      case_id: j.case_id,\n      run_id: j.run_id,\n      source: j.source,\n      file_name: j.file_name,\n      route: j.route,\n      reasons: j.reasons,\n      duplicate_of: j.duplicate_of ? j.duplicate_of.ref : null,\n      dup_key: j.dup_key,\n      total: j.invoice ? j.invoice.total : null,\n      is_invoice: j.reading ? j.reading.is_invoice === true : null,\n      reading: j.reading,\n      allocation: j.allocation,\n      read_path: j.read_path,\n      text_chars: j.text_chars,\n      pages: j.pages,\n      ai_failed: j.ai_failed === true,\n      ai_error: j.ai_error || null,\n      model: j.config.model,\n      prompt_version: j.config.prompt_version,\n      model_version: j.model_version,\n      tokens_in: j.tokens_in,\n      tokens_out: j.tokens_out,\n      read_ms: j.read_ms,\n      execution_id: String($execution.id),\n    },\n  };\n});\n",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "d99594d1-8f88-4c0e-84be-a910108f50e7",
+      "name": "Sticky Note 4-5",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2910,
+        -110
+      ],
+      "parameters": {
+        "color": 3,
+        "content": "## 4–5. Check, allocate, route\nCode recalculates every number the AI read and turns each problem into a reason code. `allocate.js` picks the store of every line by rule; the category the AI chose is checked against the list.\nDuplicate = same supplier + same invoice number. Emails are compared with Airtable (one search per email), test files with the earlier files of the same eval run.\nTest files stop at `Eval Run?` and go back to the Eval Runner.",
+        "height": 600,
+        "width": 1460
+      }
+    },
+    {
+      "id": "d0581923-637b-474c-b6d1-d879c1dac449",
+      "name": "To Record?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        880
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "to-record",
+              "leftValue": "={{ $json.route === 'recorded' || $json.route === 'needs_review' }}",
+              "operator": {
+                "operation": "true",
+                "singleValue": true,
+                "type": "boolean"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "80035c13-6c88-4fe9-9146-ef789af27f91",
+      "name": "Prepare Record",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        880
+      ],
+      "parameters": {
+        "jsCode": "// Stage 6a: everything needed to record one invoice (routes recorded and needs_review).\n// - the PDF file name for Drive: <supplier>_<invoice number>.pdf\n// - the Airtable Invoices fields and the Line Items fields (written exactly, typecast on)\n// - the problem statement for a person: what is wrong, why it was flagged and what to check,\n//   one per reason, written by code from the reason codes (the same text goes to Slack in stage 7a)\nconst money = (n) => (n === null || n === undefined ? 'unknown' : '$' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));\nconst day = (d) => {\n  if (!d) return 'an unknown date';\n  const dt = DateTime.fromISO(String(d).slice(0, 10));\n  return dt.isValid ? dt.toFormat('LLL d, yyyy') : String(d);\n};\nconst SUFFIXES = ['llc', 'inc', 'co', 'company', 'corp', 'ltd'];\nconst cleanName = (s) => {\n  const words = String(s || '').replace(/[\\\\/:*?\"<>|]/g, ' ').replace(/[.,]/g, ' ').split(/\\s+/).filter(Boolean);\n  while (words.length > 1 && SUFFIXES.includes(words[words.length - 1].toLowerCase())) words.pop();\n  return words.join(' ');\n};\nconst short = (t, n = 40) => (String(t).length > n ? String(t).slice(0, n - 1) + '…' : String(t));\n\n// Why it was flagged, one sentence per kind of reason.\nconst MATH_WHY = 'Invoices are only recorded when the lines, tax and total agree.';\nconst DATE_WHY = 'A wrong date can make a payment late or early.';\nconst MISSING_WHY = 'Required fields must be readable before an invoice is recorded.';\nconst ALLOCATION_WHY = 'Every line needs a store and a cost category for the store reports.';\nconst WHY = {\n  sum_mismatch: MATH_WHY, line_math_mismatch: MATH_WHY, total_mismatch: MATH_WHY,\n  due_before_invoice: DATE_WHY, future_date: DATE_WHY,\n  missing_invoice_number: MISSING_WHY, missing_supplier: MISSING_WHY, missing_invoice_date: MISSING_WHY,\n  missing_total: MISSING_WHY, missing_line_items: MISSING_WHY,\n  currency_not_usd: 'The books are kept in USD.',\n  duplicate_amount_differs: 'Paying both copies would pay this invoice twice.',\n  branch_unknown: ALLOCATION_WHY, uncategorized_line: ALLOCATION_WHY,\n  vendor_not_in_quickbooks: 'Bills are only created for vendors that already exist in QuickBooks, so no duplicate vendors are made.',\n};\n\nconst MATH_CHECK = 'Open the PDF. If it shows the same numbers, the supplier\\'s invoice is wrong: ask them for a corrected one. If it doesn\\'t, the reading was wrong: fix the record in Airtable.';\nfunction problemsFor(j) {\n  const inv = j.invoice || {};\n  const d = j.details || {};\n  const out = [];\n  for (const code of j.reasons || []) {\n    const x = d[code] || {};\n    let problem;\n    let check;\n    switch (code) {\n      case 'sum_mismatch':\n        problem = `The line items add up to ${money(x.lines_total)}, but the invoice states a subtotal of ${money(x.subtotal)} (${money(x.difference)} difference).`;\n        check = MATH_CHECK; break;\n      case 'line_math_mismatch': {\n        const lines = (x.lines || []).slice(0, 3).map((l) => (l.printed === null\n          ? `Line ${l.line_no} (${short(l.description)}): the amount could not be read.`\n          : `Line ${l.line_no} (${short(l.description)}): ${l.quantity} × ${money(l.unit_price)} = ${money(l.expected)}, but the invoice shows ${money(l.printed)}.`));\n        const more = (x.lines || []).length - lines.length;\n        problem = lines.join(' ') + (more > 0 ? ` And ${more} more line(s).` : '');\n        check = MATH_CHECK; break;\n      }\n      case 'total_mismatch':\n        problem = `Subtotal ${money(x.subtotal)} + tax ${money(x.tax)} = ${money(x.expected)}, but the invoice total is ${money(x.printed)}.`;\n        check = MATH_CHECK; break;\n      case 'due_before_invoice':\n        problem = `The due date (${day(x.due_date)}) is before the invoice date (${day(x.invoice_date)}).`;\n        check = 'Probably a typo. Confirm the real due date with the supplier before scheduling payment.'; break;\n      case 'missing_invoice_number':\n        problem = 'No invoice number was found, so the system can\\'t check whether it was already paid.';\n        check = 'Open the PDF. If a number is there, add it in Airtable. If there\\'s none, ask the supplier for one. PO and account numbers are not invoice numbers.'; break;\n      case 'missing_supplier':\n      case 'missing_invoice_date':\n      case 'missing_total':\n      case 'missing_line_items':\n        problem = `The ${x.field || code.replace('missing_', '').replace(/_/g, ' ')} could not be read.`;\n        check = 'Open the PDF and fill it in in Airtable.'; break;\n      case 'future_date':\n        problem = `The invoice date (${day(x.invoice_date)}) is in the future.`;\n        check = 'Check the date on the PDF before scheduling payment.'; break;\n      case 'currency_not_usd':\n        problem = `This invoice is in ${x.currency}, not USD.`;\n        check = 'Confirm the USD amount with the supplier before paying.'; break;\n      case 'duplicate_amount_differs': {\n        const e = x.earlier || {};\n        problem = `${inv.supplier || 'This supplier'} ${inv.invoice_number || ''} was already recorded${e.recorded_at ? ' on ' + day(e.recorded_at) : ''} for ${money(x.earlier_total)}, but this copy says ${money(x.this_total)}.`;\n        check = 'It may be a corrected invoice. Keep one and void the other.'; break;\n      }\n      case 'branch_unknown':\n        problem = `${x.lines} line(s) totalling ${money(x.amount)} could not be assigned to a store: no delivery address and no store named on the line.`;\n        check = 'Set the Branch on those lines in Airtable. If the supplier always leaves the address off, ask them to add it.'; break;\n      case 'vendor_not_in_quickbooks': {\n        const who = x.supplier || inv.supplier || 'The supplier';\n        if ((x.matches || []).length > 1) {\n          problem = `${who} matches more than one vendor in QuickBooks (${x.matches.join(', ')}), so no bill was created.`;\n          check = 'Merge or rename those vendors in QuickBooks so only one matches, then create the bill from the Airtable record.';\n        } else {\n          problem = `${who} is not set up as a vendor in QuickBooks, so no bill was created.`;\n          check = 'Add the vendor in QuickBooks (or fix the spelling), then create the bill from the Airtable record.';\n        }\n        break;\n      }\n      case 'uncategorized_line':\n        problem = `${x.lines} line(s) totalling ${money(x.amount)} have no cost category` + ((x.examples || []).length ? ` (e.g. \"${short(x.examples[0])}\").` : '.');\n        check = 'Pick the Category in Airtable. If it is a new kind of purchase, add it to the category list.'; break;\n      default:\n        problem = `Flagged: ${code}.`;\n        check = 'Open the PDF and check the record in Airtable.';\n    }\n    out.push({ reason: code, problem, why: WHY[code] || 'A person needs to look at this before it is recorded.', check });\n  }\n  return out;\n}\n\nreturn $input.all().map((item) => {\n  const j = item.json;\n  const cfg = j.config;\n  const inv = j.invoice;\n  const branchName = Object.fromEntries(cfg.branches.map((b) => [b.code, b.name]));\n  branchName.unassigned = 'Unassigned';\n  const categoryName = Object.fromEntries(cfg.categories.map((c) => [c.code, c.name]));\n  const problems = problemsFor(j);\n  const problemText = problems.length === 1\n    ? `Problem: ${problems[0].problem}\\nWhy it was flagged: ${problems[0].why}\\nWhat to check: ${problems[0].check}`\n    : problems.map((p, n) => `${n + 1}. Problem: ${p.problem}\\n   Why it was flagged: ${p.why}\\n   What to check: ${p.check}`).join('\\n');\n\n  // The QuickBooks vendor name, when one matched, so the same supplier is always spelled the same way.\n  const supplierName = (j.vendor && j.vendor.name) || inv.supplier;\n  const supplierForFile = cleanName(supplierName) || 'Unknown supplier';\n  const numberForFile = inv.invoice_number ? inv.invoice_number.replace(/[\\\\/:*?\"<>|\\s]+/g, '-') : 'no-number_' + (inv.invoice_date || String(j.received_at).slice(0, 10));\n  const invoiceFields = {\n    'Invoice number': inv.invoice_number || undefined,\n    'Supplier': supplierName || undefined,\n    'Invoice date': inv.invoice_date || undefined,\n    'Due date': inv.due_date || undefined,\n    'Currency': inv.currency || undefined,\n    'Subtotal': inv.subtotal ?? undefined,\n    'Tax': inv.tax ?? undefined,\n    'Total': inv.total ?? undefined,\n    'Ship-to branch': j.allocation && j.allocation.ship_to_branch ? branchName[j.allocation.ship_to_branch] : undefined,\n    'Status': j.route === 'recorded' ? 'Recorded' : 'Needs Review',\n    'Review reasons': j.reasons.length ? j.reasons : undefined,\n    'Problem': problems.length ? problemText : undefined,\n    'Source': `${j.sender_name ? j.sender_name + ' ' : ''}<${j.sender}> · ${j.subject ? '\"' + j.subject + '\"' : '(no subject)'}`,\n    'Received at': j.received_at,\n    'Dup key': j.dup_key || undefined,\n  };\n  const lineFields = (inv.line_items || []).map((l, n) => ({\n    'Line no': l.line_no,\n    'Description': l.description,\n    'Quantity': l.quantity ?? undefined,\n    'Unit price': l.unit_price ?? undefined,\n    'Amount': l.amount ?? undefined,\n    'Branch': branchName[j.allocation.lines[n].branch] || undefined,\n    'Category': categoryName[l.category] || undefined,\n  }));\n  return {\n    json: {\n      ...j,\n      problems,\n      problem_text: problems.length ? problemText : '',\n      record: {\n        drive_file_name: `${supplierForFile}_${numberForFile}.pdf`,\n        invoice_fields: JSON.parse(JSON.stringify(invoiceFields)), // drops the undefined fields\n        line_fields: JSON.parse(JSON.stringify(lineFields)),\n      },\n    },\n    binary: item.binary,\n  };\n});\n",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "17b55601-1935-424f-8abf-604d964627e2",
+      "name": "Save PDF to Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        960,
+        880
+      ],
+      "parameters": {
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_INVOICES_FOLDER_ID"
+        },
+        "inputDataFieldName": "data",
+        "name": "={{ $json.record.drive_file_name }}",
+        "operation": "upload",
+        "options": {},
+        "resource": "file"
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "id": "8570f653-b73c-4613-b2ac-0b4f236dd162",
+      "name": "Invoice Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        880
+      ],
+      "parameters": {
+        "jsCode": "// The Airtable request for one invoice, now that the PDF is in Drive.\n// typecast lets Airtable accept the select values as text (they match the field options).\nconst rec = $('Prepare Record').item.json;\nconst fileId = $json.id;\nreturn {\n  json: {\n    drive_file_id: fileId,\n    drive_url: fileId ? 'https://drive.google.com/file/d/' + fileId + '/view' : null,\n    body: {\n      typecast: true,\n      records: [{\n        fields: {\n          ...rec.record.invoice_fields,\n          'PDF': fileId ? 'https://drive.google.com/file/d/' + fileId + '/view' : undefined,\n          'Execution ID': String($execution.id),\n        },\n      }],\n    },\n  },\n};\n",
+        "mode": "runOnceForEachItem"
+      }
+    },
+    {
+      "id": "35974655-fc52-4b65-997c-4dae27581d92",
+      "name": "Create Invoice Record",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1440,
+        880
+      ],
+      "parameters": {
+        "authentication": "predefinedCredentialType",
+        "contentType": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "method": "POST",
+        "nodeCredentialType": "airtableTokenApi",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchInterval": 250,
+              "batchSize": 1
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "url": "https://api.airtable.com/v0/YOUR_AIRTABLE_BASE_ID/YOUR_INVOICES_TABLE_ID"
+      }
+    },
+    {
+      "id": "52f7a058-39fb-4ce4-97ba-eeb2d3698b7f",
+      "name": "Line Item Requests",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        880
+      ],
+      "parameters": {
+        "jsCode": "// Line Items for each new Invoice record, 10 per request (Airtable's limit per call),\n// each linked to its invoice. An invoice without lines sends nothing here.\nconst out = [];\n$input.all().forEach((item, i) => {\n  const created = (item.json.records || [])[0];\n  const rec = $('Prepare Record').itemMatching(i).json;\n  if (!created || !created.id) return;\n  const lines = rec.record.line_fields || [];\n  for (let start = 0; start < lines.length; start += 10) {\n    out.push({\n      json: {\n        invoice_record_id: created.id,\n        dup_key: rec.dup_key,\n        lines_from: start + 1,\n        lines_to: Math.min(start + 10, lines.length),\n        body: {\n          typecast: true,\n          records: lines.slice(start, start + 10).map((f) => ({ fields: { ...f, 'Invoice': [created.id] } })),\n        },\n      },\n    });\n  }\n});\nreturn out;\n",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "e7fda645-ba6c-48b9-a9fa-6fe60d560489",
+      "name": "Create Line Items",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1920,
+        880
+      ],
+      "parameters": {
+        "authentication": "predefinedCredentialType",
+        "contentType": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "method": "POST",
+        "nodeCredentialType": "airtableTokenApi",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchInterval": 250,
+              "batchSize": 1
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "url": "https://api.airtable.com/v0/YOUR_AIRTABLE_BASE_ID/YOUR_LINE_ITEMS_TABLE_ID"
+      }
+    },
+    {
+      "id": "87c2bb96-e5d9-4c7f-a6c6-1a0c12f5a9b1",
+      "name": "Sticky Note 6",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -50,
+        760
+      ],
+      "parameters": {
+        "color": 6,
+        "content": "## 6. Record (emails only)\nRecorded and needs-review invoices: the QuickBooks vendor is matched by name (never created), then the PDF goes to Drive `Invoices`, then one Airtable Invoice record (status, review reasons, problem statement, PDF link) and its Line Items with store and category. No vendor match = needs review. Creating records is never retried, so nothing is recorded twice.",
+        "height": 300,
+        "width": 2160
+      }
+    },
+    {
+      "id": "305e9082-769a-48a5-8778-49cc227923cc",
+      "name": "Find QuickBooks Vendors",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        240,
+        880
+      ],
+      "parameters": {
+        "authentication": "predefinedCredentialType",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "method": "GET",
+        "nodeCredentialType": "quickBooksOAuth2Api",
+        "options": {},
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "query",
+              "value": "select Id, DisplayName, CompanyName from Vendor where Active = true maxresults 1000"
+            },
+            {
+              "name": "minorversion",
+              "value": "={{ $json.config.quickbooks.minor_version }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "sendQuery": true,
+        "specifyHeaders": "keypair",
+        "specifyQuery": "keypair",
+        "url": "={{ $json.config.quickbooks.base_url }}/query"
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000,
+      "executeOnce": true
+    },
+    {
+      "id": "0fdf1200-efbf-489a-87bd-5b5a1ff7d48c",
+      "name": "Match Vendor",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        880
+      ],
+      "parameters": {
+        "jsCode": "// Stage 6b: find the QuickBooks vendor for each invoice that will be recorded.\n// Names are compared the same way as for the duplicate key: lower case, no punctuation,\n// company suffixes (LLC, Inc, Co, ...) dropped, against the vendor's display name and\n// company name (accents removed: \\p{M} = combining marks after NFD).\n// Exactly one vendor must match. Vendors are never created here: with no\n// match (or more than one), no bill is made and the invoice goes to review.\nconst SUFFIXES = ['llc', 'inc', 'co', 'company', 'corp', 'ltd'];\nconst normSupplier = (s) => String(s || '').normalize('NFD').replace(/\\p{M}/gu, '').toLowerCase()\n  .replace(/['’]/g, '').replace(/[^a-z0-9]+/g, ' ').trim().split(' ')\n  .filter((w) => w && !SUFFIXES.includes(w)).join(' ');\n\nconst reply = $('Find QuickBooks Vendors').first().json;\nconst vendors = ((reply.QueryResponse && reply.QueryResponse.Vendor) || []).map((v) => ({\n  id: String(v.Id),\n  name: v.DisplayName,\n  keys: [...new Set([v.DisplayName, v.CompanyName].filter(Boolean).map(normSupplier))],\n}));\n\nreturn $('To Record?').all(0).map((item) => {\n  const j = item.json;\n  const key = normSupplier(j.invoice && j.invoice.supplier);\n  const matches = key ? vendors.filter((v) => v.keys.includes(key)) : [];\n  const vendor = matches.length === 1\n    ? { id: matches[0].id, name: matches[0].name, match: 'one' }\n    : { id: null, name: null, match: matches.length ? 'several' : 'none', candidates: matches.map((m) => m.name) };\n\n  if (vendor.match === 'one') {\n    return { json: { ...j, vendor, vendors_checked: vendors.length }, binary: item.binary };\n  }\n  return {\n    json: {\n      ...j,\n      vendor,\n      vendors_checked: vendors.length,\n      route: 'needs_review',\n      reasons: [...j.reasons, 'vendor_not_in_quickbooks'],\n      details: { ...j.details, vendor_not_in_quickbooks: { supplier: j.invoice && j.invoice.supplier, matches: matches.map((m) => m.name) } },\n    },\n    binary: item.binary,\n  };\n});\n",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "ca29261f-5d39-4985-b2dc-cc372fdb60a5",
+      "name": "Bill Requests",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2160,
+        880
+      ],
+      "parameters": {
+        "jsCode": "// Stage 6b: one QuickBooks bill per invoice with route \"recorded\" (the checks passed and\n// exactly one vendor matched). Runs after the Airtable records exist, so the bill can name\n// its Airtable record and the PDF. Needs-review invoices get no bill.\n// One bill line per invoice line (account from the category, Class from the store),\n// plus one line for the tax. The checks already made sure lines + tax = the printed total\n// (within a cent per check), so the bill total matches the invoice.\nconst round = (n) => Math.round(Number(n) * 100) / 100;\nconst prepared = $('Prepare Record').all().map((p) => p.json);\nconst out = [];\n\nfor (const created of $('Create Invoice Record').all()) {\n  const record = (created.json.records || [])[0];\n  if (!record) continue;\n  const dupKey = record.fields['Dup key'];\n  const rec = prepared.find((p) => p.dup_key && p.dup_key === dupKey);\n  if (!rec || rec.route !== 'recorded' || !rec.vendor || rec.vendor.match !== 'one') continue;\n\n  const qb = rec.config.quickbooks;\n  const inv = rec.invoice;\n  const lines = inv.line_items.map((l, n) => {\n    const branch = rec.allocation.lines[n].branch;\n    const account = qb.accounts[l.category];\n    const cls = qb.classes[branch];\n    if (!account || !cls) throw new Error(`No QuickBooks account or Class for ${inv.invoice_number} line ${l.line_no} (category ${l.category}, store ${branch}). Check Config.`);\n    return {\n      DetailType: 'AccountBasedExpenseLineDetail',\n      Amount: round(l.amount),\n      Description: l.description,\n      AccountBasedExpenseLineDetail: { AccountRef: { value: account }, ClassRef: { value: cls } },\n    };\n  });\n  if (inv.tax) {\n    lines.push({\n      DetailType: 'AccountBasedExpenseLineDetail',\n      Amount: round(inv.tax),\n      Description: 'Sales tax',\n      AccountBasedExpenseLineDetail: {\n        AccountRef: { value: qb.tax_account },\n        ClassRef: { value: qb.classes[(rec.allocation && rec.allocation.ship_to_branch) || 'shared'] },\n      },\n    });\n  }\n\n  const number = String(inv.invoice_number);\n  const tooLong = number.length > qb.doc_number_max;\n  const note = [\n    `Invoice ${number} from ${rec.vendor.name}, recorded by the Copper Kettle AP automation.`,\n    `Airtable record ${record.id}.`,\n    record.fields.PDF ? `PDF: ${record.fields.PDF}` : null,\n    `n8n execution ${$execution.id}.`,\n    tooLong ? `The invoice number is longer than ${qb.doc_number_max} characters, so the bill number is shortened.` : null,\n  ].filter(Boolean).join('\\n');\n\n  const body = {\n    VendorRef: { value: rec.vendor.id },\n    DocNumber: tooLong ? number.slice(0, qb.doc_number_max) : number,\n    TxnDate: inv.invoice_date,\n    PrivateNote: note,\n    Line: lines,\n  };\n  if (inv.due_date) body.DueDate = inv.due_date;\n\n  out.push({\n    json: {\n      airtable_record_id: record.id,\n      dup_key: dupKey,\n      invoice_number: number,\n      expected_total: round(lines.reduce((sum, l) => sum + l.Amount, 0)), // what QuickBooks should show\n      printed_total: round(inv.total),\n      bill_url: `${qb.base_url}/bill?minorversion=${qb.minor_version}`,\n      body,\n    },\n  });\n}\nreturn out;\n",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "a7b0ac01-cb90-473e-a705-93b2955e9ddc",
+      "name": "Create Bill",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        2400,
+        880
+      ],
+      "parameters": {
+        "authentication": "predefinedCredentialType",
+        "contentType": "json",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "method": "POST",
+        "nodeCredentialType": "quickBooksOAuth2Api",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchInterval": 300,
+              "batchSize": 1
+            }
+          }
+        },
+        "sendBody": true,
+        "sendHeaders": true,
+        "specifyBody": "json",
+        "specifyHeaders": "keypair",
+        "url": "={{ $json.bill_url }}"
+      }
+    },
+    {
+      "id": "76b0fa23-12fb-4431-951c-1cefb2948f37",
+      "name": "Bill ID Updates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        880
+      ],
+      "parameters": {
+        "jsCode": "// Stage 6b: write each new bill's QuickBooks ID into its Airtable invoice (10 records per\n// request) and check that QuickBooks shows the total the bill was built with.\nconst bills = $input.all().map((item, i) => {\n  const req = $('Bill Requests').itemMatching(i).json;\n  const bill = item.json.Bill || {};\n  const total = bill.TotalAmt === undefined ? null : Number(bill.TotalAmt);\n  return {\n    airtable_record_id: req.airtable_record_id,\n    invoice_number: req.invoice_number,\n    bill_id: bill.Id ? String(bill.Id) : null,\n    bill_total: total,\n    expected_total: req.expected_total,\n    printed_total: req.printed_total,\n    total_ok: total !== null && Math.abs(total - req.expected_total) < 0.005,\n  };\n});\n\nconst saved = bills.filter((b) => b.bill_id);\nconst out = [];\nfor (let start = 0; start < saved.length; start += 10) {\n  const chunk = saved.slice(start, start + 10);\n  out.push({\n    json: {\n      bills: chunk,\n      body: { records: chunk.map((b) => ({ id: b.airtable_record_id, fields: { 'QuickBooks bill': b.bill_id } })) },\n    },\n  });\n}\nreturn out;\n",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "bb14fd64-c6e6-474e-ab3a-5d91eba010af",
+      "name": "Save Bill ID",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        2880,
+        880
+      ],
+      "parameters": {
+        "authentication": "predefinedCredentialType",
+        "contentType": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "method": "PATCH",
+        "nodeCredentialType": "airtableTokenApi",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchInterval": 250,
+              "batchSize": 1
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "url": "https://api.airtable.com/v0/YOUR_AIRTABLE_BASE_ID/YOUR_INVOICES_TABLE_ID"
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "id": "8652fbf0-0699-464c-b5e4-a83dbad97e4a",
+      "name": "Sticky Note 6b",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2110,
+        760
+      ],
+      "parameters": {
+        "color": 4,
+        "content": "## 6b. QuickBooks bill (recorded only)\nOne unpaid bill per recorded invoice: a bill line per invoice line (account from the category, Class from the store) plus a tax line. The bill ID goes back to Airtable, and the code checks the QuickBooks total. Then the PDF is attached to the bill. Bills and attachments are never retried; a failed attachment is listed for stage 7 instead of stopping the run.",
+        "height": 300,
+        "width": 1660
+      }
+    },
+    {
+      "id": "c1c40cb4-4940-42a1-ac3d-ca1c8c738f4f",
+      "name": "Attachment Requests",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3120,
+        880
+      ],
+      "parameters": {
+        "jsCode": "// Stage 6b-2: attach the invoice PDF to its new QuickBooks bill.\n// QuickBooks takes files through its upload endpoint: one multipart request with two parts,\n// file_metadata_01 (JSON: which bill, file name, type) and file_content_01 (the PDF).\n// The metadata is sent as a small JSON file, so that part goes out as application/json.\nconst toBase64 = (s) => (typeof Buffer !== 'undefined' ? Buffer.from(s, 'utf8').toString('base64') : btoa(s));\nconst prepared = $('Prepare Record').all();\nconst requests = $('Bill Requests').all().map((r) => r.json);\nconst out = [];\n\n$('Create Bill').all().forEach((item, i) => {\n  const bill = item.json.Bill;\n  const req = requests[i];\n  if (!bill || !bill.Id || !req) return;\n  // Create Bill answers in the order it was asked; make sure the pair really belongs together.\n  if (String(bill.DocNumber) !== String(req.body.DocNumber)) {\n    throw new Error(`Bill ${bill.Id} has number ${bill.DocNumber}, but request ${i + 1} was for ${req.body.DocNumber}.`);\n  }\n  const source = prepared.find((p) => p.json.dup_key === req.dup_key);\n  if (!source || !source.binary || !source.binary.data) {\n    throw new Error(`No PDF found for bill ${bill.Id} (${req.invoice_number}).`);\n  }\n  const qb = source.json.config.quickbooks;\n  const fileName = source.json.record.drive_file_name;\n  const meta = {\n    AttachableRef: [{ EntityRef: { type: 'Bill', value: String(bill.Id) }, IncludeOnSend: false }],\n    FileName: fileName,\n    ContentType: 'application/pdf',\n  };\n  out.push({\n    json: {\n      bill_id: String(bill.Id),\n      invoice_number: req.invoice_number,\n      file_name: fileName,\n      upload_url: `${qb.base_url}/upload?minorversion=${qb.minor_version}`,\n    },\n    binary: {\n      meta: { data: toBase64(JSON.stringify(meta)), mimeType: 'application/json', fileName: 'metadata.json', fileExtension: 'json' },\n      file: { ...source.binary.data, fileName, mimeType: 'application/pdf' },\n    },\n  });\n});\nreturn out;\n",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "de24a21e-5328-4f7c-99eb-71e3ed27f925",
+      "name": "Attach PDF to Bill",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        3360,
+        880
+      ],
+      "parameters": {
+        "authentication": "predefinedCredentialType",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "inputDataFieldName": "meta",
+              "name": "file_metadata_01",
+              "parameterType": "formBinaryData"
+            },
+            {
+              "inputDataFieldName": "file",
+              "name": "file_content_01",
+              "parameterType": "formBinaryData"
+            }
+          ]
+        },
+        "contentType": "multipart-form-data",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "method": "POST",
+        "nodeCredentialType": "quickBooksOAuth2Api",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchInterval": 300,
+              "batchSize": 1
+            }
+          }
+        },
+        "sendBody": true,
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "url": "={{ $json.upload_url }}"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "13d9397c-7075-4b81-9b7a-0b1ceb5ba6ea",
+      "name": "Attachment Check",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3600,
+        880
+      ],
+      "parameters": {
+        "jsCode": "// Stage 6b-2: did each PDF reach its bill? A failed upload does not stop the run (the bill\n// and the Airtable record already exist); it is listed here so stage 7 can report it.\nconst results = $input.all().map((item, i) => {\n  const req = $('Attachment Requests').itemMatching(i).json;\n  const res = (item.json.AttachableResponse || [])[0] || {};\n  const att = res.Attachable;\n  const fault = res.Fault || item.json.Fault;\n  const err = item.json.error;\n  const ok = !!(att && att.Id);\n  return {\n    bill_id: req.bill_id,\n    invoice_number: req.invoice_number,\n    file_name: req.file_name,\n    attachable_id: ok ? String(att.Id) : null,\n    size: ok && att.Size !== undefined ? Number(att.Size) : null,\n    ok,\n    error: ok ? null : (err ? (err.message || JSON.stringify(err)) : fault ? JSON.stringify(fault) : 'No attachment in the QuickBooks reply'),\n  };\n});\nreturn [{ json: { attachments: results, attached: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length } }];\n",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "1ff65e0b-5f9f-4ed8-85f7-e90fab90943b",
+      "name": "Skip Messages",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        1260
+      ],
+      "parameters": {
+        "jsCode": "// Stage 7a: a short Slack note for every document that was not recorded on purpose,\n// so nothing disappears silently: duplicates (with a link to the record that was kept)\n// and documents that are not invoices. Errors are reported in stage 7b.\nconst AIRTABLE_RECORD_URL = 'https://airtable.com/YOUR_AIRTABLE_BASE_ID/YOUR_INVOICES_TABLE_ID/';\nconst money = (n) => (n === null || n === undefined ? 'unknown total' : '$' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));\nconst esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst day = (d, zone) => {\n  if (!d) return null;\n  const dt = String(d).length > 10 ? DateTime.fromISO(String(d)).setZone(zone) : DateTime.fromISO(String(d));\n  return dt.isValid ? dt.toFormat('LLL d, yyyy') : String(d);\n};\n\nconst out = [];\nfor (const item of $input.all()) {\n  const j = item.json;\n  const zone = (j.config && j.config.timezone) || 'America/Denver';\n  const from = `${j.sender_name ? j.sender_name + ' ' : ''}<${j.sender}>`;\n  let text = null;\n\n  if (j.route === 'duplicate') {\n    const inv = j.invoice || {};\n    const d = j.duplicate_of || {};\n    const what = `${inv.supplier || 'Unknown supplier'} · ${inv.invoice_number || 'no invoice number'}`;\n    const due = inv.due_date ? ` It's due ${day(inv.due_date, zone)}.` : '';\n    if (d.where === 'airtable') {\n      const when = d.recorded_at ? ` on ${day(d.recorded_at, zone)}` : '';\n      text = `🔁 Duplicate skipped: ${esc(d.label || what)} · ${money(inv.total)} was already recorded${when} (<${AIRTABLE_RECORD_URL}${d.ref}|Airtable record>). Nothing was added.${due}`;\n    } else {\n      text = `🔁 Duplicate skipped: ${esc(what)} · ${money(inv.total)} is the same invoice as ${esc(d.ref || 'another file')} in this email. Only one copy was recorded.${due}`;\n    }\n  } else if (j.route === 'not_invoice') {\n    const subject = j.subject ? `\"${j.subject}\"` : 'no subject';\n    text = `📄 Not an invoice, skipped: ${esc(j.file_name)} from ${esc(from)} (${esc(subject)}). If it is an invoice, forward it again or add it by hand.`;\n  }\n\n  if (text) out.push({ json: { kind: j.route, file_name: j.file_name, dup_key: j.dup_key || null, text } });\n}\nreturn out;\n",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "2175b4d0-e05c-4f01-8c64-308d0ebbd6e9",
+      "name": "Slack: Skipped",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.7,
+      "position": [
+        480,
+        1260
+      ],
+      "parameters": {
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_INVOICE_REVIEW_CHANNEL_ID"
+        },
+        "messageType": "text",
+        "operation": "post",
+        "otherOptions": {
+          "includeLinkToWorkflow": false,
+          "unfurl_links": false,
+          "unfurl_media": false
+        },
+        "resource": "message",
+        "select": "channel",
+        "text": "={{ $json.text }}"
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "webhookId": "232c1757-414f-44ef-9b87-4c8b38842da3"
+    },
+    {
+      "id": "96dd7272-c708-44d7-87c9-277b6b64b41f",
+      "name": "Review Messages",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        1260
+      ],
+      "parameters": {
+        "jsCode": "// Stage 7a: one Slack message per invoice that needs review, sent after its Airtable record\n// exists so the message can link to it. The text is the same problem statement as the\n// Problem field in Airtable (Prepare Record), with a header and links. Written by code.\nconst AIRTABLE_RECORD_URL = 'https://airtable.com/YOUR_AIRTABLE_BASE_ID/YOUR_INVOICES_TABLE_ID/';\nconst money = (n) => (n === null || n === undefined ? 'unknown total' : '$' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));\n// Slack treats &, < and > as markup, so they are escaped in anything that came from a document or an email.\nconst esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n\nconst out = [];\n$input.all().forEach((item, i) => {\n  const record = (item.json.records || [])[0];\n  const rec = $('Prepare Record').itemMatching(i).json;\n  if (!record || rec.route !== 'needs_review') return;\n  const f = rec.record.invoice_fields;\n  const header = `⚠️ Needs review: ${esc(f.Supplier || 'Unknown supplier')} · ${esc(f['Invoice number'] || 'no invoice number')} · ${money(f.Total)}`;\n  const links = [\n    record.fields.PDF ? `<${record.fields.PDF}|PDF>` : null,\n    `<${AIRTABLE_RECORD_URL}${record.id}|Airtable record>`,\n  ].filter(Boolean).join(' · ');\n  out.push({\n    json: {\n      kind: 'needs_review',\n      airtable_record_id: record.id,\n      file_name: rec.file_name,\n      reasons: rec.reasons,\n      text: [header, esc(rec.problem_text), links].join('\\n'),\n    },\n  });\n});\nreturn out;\n",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "1faa7f4c-b6be-4c70-8512-738f80491f43",
+      "name": "Slack: Review Needed",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.7,
+      "position": [
+        1920,
+        1260
+      ],
+      "parameters": {
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_INVOICE_REVIEW_CHANNEL_ID"
+        },
+        "messageType": "text",
+        "operation": "post",
+        "otherOptions": {
+          "includeLinkToWorkflow": false,
+          "unfurl_links": false,
+          "unfurl_media": false
+        },
+        "resource": "message",
+        "select": "channel",
+        "text": "={{ $json.text }}"
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "webhookId": "fcd0e631-dd94-46be-8be6-e0e316b1a7b1"
+    },
+    {
+      "id": "cfce2961-9f35-48c5-a41d-ad0cea8e302d",
+      "name": "Sticky Note 7a skipped",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        190,
+        1100
+      ],
+      "parameters": {
+        "color": 3,
+        "content": "## 7a. Tell the team: skipped\nDuplicates and documents that are not invoices get a short note in #invoice-review, so nothing disappears silently. Errors are reported in stage 7b.",
+        "height": 320,
+        "width": 560
+      }
+    },
+    {
+      "id": "f5857e4f-0d2f-489e-8f38-e623efed56d7",
+      "name": "Sticky Note 7a review",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1630,
+        1100
+      ],
+      "parameters": {
+        "color": 3,
+        "content": "## 7a. Tell the team: needs review\nOne message per needs-review invoice in #invoice-review: the same problem statement as in Airtable (problem, why it was flagged, what to check) with links to the PDF and the record. Recorded invoices send nothing.",
+        "height": 320,
+        "width": 560
+      }
+    },
+    {
+      "id": "c1fa23e3-acbf-4620-a5b8-ea650f7b8372",
+      "name": "Log: Not Recorded",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        1620
+      ],
+      "parameters": {
+        "jsCode": "// Stage 7b: one row in the data table p3_processing_log for every document from the inbox.\n// The same code runs in three places and recognises where it is from its input:\n//   - after To Record? \"false\": duplicates, non-invoices and errors (nothing recorded)\n//   - after Create Invoice Record: needs-review invoices (Airtable record, Drive link)\n//   - after Attachment Check: recorded invoices (plus QuickBooks bill and attachment result)\n// duration_ms runs from the start of reading (Read Path) to this row.\nconst now = Date.now();\nconst str = (v) => (v === null || v === undefined || v === '' ? null : String(v));\nconst num = (v) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));\n\nfunction row(j, extra) {\n  const inv = j.invoice || {};\n  return {\n    received_at: str(j.received_at),\n    mode: str(j.source),\n    run_id: str(j.run_id),\n    case_id: str(j.case_id),\n    email_id: str(j.email_id),\n    sender: str(j.sender ? `${j.sender_name ? j.sender_name + ' ' : ''}<${j.sender}>` : null),\n    subject: str(j.subject),\n    file_name: str(j.file_name),\n    read_path: str(j.read_path),\n    route: str(j.route),\n    reasons: str((j.reasons || []).join(', ')),\n    supplier: str((j.vendor && j.vendor.name) || inv.supplier),\n    invoice_number: str(inv.invoice_number),\n    total: num(inv.total),\n    dup_key: str(j.dup_key),\n    extracted: j.reading ? JSON.stringify(j.reading) : null,\n    airtable_id: null,\n    quickbooks_bill_id: null,\n    drive_url: null,\n    error_step: str(j.error_step),\n    error_message: str(j.error_message),\n    duration_ms: j.read_started_at ? now - j.read_started_at : null,\n    execution_id: String($execution.id),\n    ...extra,\n  };\n}\n\nconst items = $input.all();\nconst first = items.length ? items[0].json : {};\nconst out = [];\n\nif (first.attachments) {\n  // Recorded invoices: one Bill Requests item per bill, in the same order as Create Bill.\n  const prepared = $('Prepare Record').all().map((p) => p.json);\n  const bills = $('Create Bill').all().map((b) => b.json.Bill || {});\n  const records = $('Create Invoice Record').all().map((c) => (c.json.records || [])[0]).filter(Boolean);\n  const attachments = first.attachments;\n  $('Bill Requests').all().forEach((reqItem, i) => {\n    const req = reqItem.json;\n    const j = prepared.find((p) => p.dup_key === req.dup_key);\n    if (!j) return;\n    const bill = bills[i] || {};\n    const record = records.find((r) => r.id === req.airtable_record_id) || { fields: {} };\n    const att = attachments.find((a) => a.bill_id === String(bill.Id)) || null;\n    out.push(row(j, {\n      airtable_id: req.airtable_record_id,\n      quickbooks_bill_id: str(bill.Id),\n      drive_url: str(record.fields.PDF),\n      error_step: att && !att.ok ? 'attach_pdf' : null,\n      error_message: att && !att.ok ? str(att.error) : null,\n    }));\n  });\n} else if (first.records) {\n  // Needs-review invoices, right after their Airtable record was created.\n  items.forEach((item, i) => {\n    const record = (item.json.records || [])[0];\n    const j = $('Prepare Record').itemMatching(i).json;\n    if (!record || j.route !== 'needs_review') return;\n    out.push(row(j, { airtable_id: record.id, drive_url: str(record.fields.PDF) }));\n  });\n} else {\n  // Not recorded on purpose (duplicate, not an invoice) or failed (error).\n  items.forEach((item) => out.push(row(item.json, {})));\n}\n\nreturn out.map((json) => ({ json }));\n",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "f6e15c3b-4cfa-467b-af35-2f860be1a71b",
+      "name": "Save Log: Not Recorded",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        480,
+        1620
+      ],
+      "parameters": {
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "matchingColumns": [],
+          "schema": [
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "received_at",
+              "id": "received_at",
+              "required": false,
+              "type": "dateTime"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "mode",
+              "id": "mode",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "run_id",
+              "id": "run_id",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "case_id",
+              "id": "case_id",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "email_id",
+              "id": "email_id",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "sender",
+              "id": "sender",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "subject",
+              "id": "subject",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "file_name",
+              "id": "file_name",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "read_path",
+              "id": "read_path",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "route",
+              "id": "route",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "reasons",
+              "id": "reasons",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "supplier",
+              "id": "supplier",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "invoice_number",
+              "id": "invoice_number",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "total",
+              "id": "total",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "dup_key",
+              "id": "dup_key",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "extracted",
+              "id": "extracted",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "airtable_id",
+              "id": "airtable_id",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "quickbooks_bill_id",
+              "id": "quickbooks_bill_id",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "drive_url",
+              "id": "drive_url",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "error_step",
+              "id": "error_step",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "error_message",
+              "id": "error_message",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "duration_ms",
+              "id": "duration_ms",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "execution_id",
+              "id": "execution_id",
+              "required": false,
+              "type": "string"
+            }
+          ],
+          "value": {}
+        },
+        "dataTableId": {
+          "__rl": true,
+          "cachedResultName": "p3_processing_log",
+          "mode": "id",
+          "value": "YOUR_PROCESSING_LOG_TABLE_ID"
+        },
+        "operation": "insert",
+        "options": {},
+        "resource": "row"
+      }
+    },
+    {
+      "id": "954140d9-e7a5-40f0-b8c4-350ba0042e52",
+      "name": "Alert: Reading Failed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        1860
+      ],
+      "parameters": {
+        "jsCode": "// Stage 7b: technical problems go to #automation-errors (not #invoice-review), written by code:\n// what failed, what it means, what is saved, and what to do next.\n// The same code runs in two places and recognises where it is from its input:\n//   - after To Record? \"false\": documents with route \"error\" (the reading failed)\n//   - after Attachment Check: PDFs that did not reach their QuickBooks bill\nconst esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst short = (s, n = 300) => (String(s).length > n ? String(s).slice(0, n - 1) + '…' : String(s));\nconst exec = `execution ${$execution.id}`;\n\n// What to do next after a failed reading depends on the kind of failure.\nfunction readingNext(j) {\n  const err = String(j.error_message || j.ai_error || '');\n  if (j.pdf_header_ok === false) return 'Next: the file is not a real PDF (it does not start with %PDF). Ask the sender for the invoice as a PDF, then forward it again.';\n  if (/unavailable|overloaded|503|timed? ?out|ECONNRESET|socket hang up/i.test(err)) return 'Next: Gemini was busy or unreachable for a moment; the invoice itself is fine. Forward the email again in a few minutes.';\n  if (/too many requests|429|quota|rate limit|RESOURCE_EXHAUSTED/i.test(err)) return 'Next: the Gemini quota or rate limit was reached. Forward the email again in a few minutes; if it keeps happening, check the quota of the API key.';\n  if (/authoriz|forbidden|401|403|api key|credential/i.test(err)) return 'Next: check the Gemini API key in the n8n credential, then forward the email again.';\n  if (/not valid JSON|no text|not an object/i.test(err)) return 'Next: Gemini answered, but not in the expected format. Forward the email again; if it fails twice, enter the invoice by hand.';\n  return 'Next: check the Gemini API key, the model name and the quota in n8n, then forward the email again.';\n}\n\nconst items = $input.all();\nconst first = items.length ? items[0].json : {};\nconst out = [];\n\nif (first.attachments) {\n  for (const a of first.attachments.filter((x) => !x.ok)) {\n    out.push({ json: { kind: 'attach_pdf', text: [\n      `🛑 Attaching the PDF to QuickBooks bill ${esc(a.bill_id)} failed (${esc(a.invoice_number)}, ${esc(a.file_name)}).`,\n      'Impact: the bill was created, but it has no PDF attached.',\n      `Saved: the PDF is in the Drive folder Invoices, and the attempt is in the processing log (${exec}).`,\n      'Next: attach the PDF to the bill by hand in QuickBooks. If it keeps failing, check the QuickBooks login (Sandbox environment) in n8n.',\n      `Error: ${esc(short(a.error || 'unknown'))}`,\n    ].join('\\n') } });\n  }\n} else {\n  for (const item of items) {\n    const j = item.json;\n    if (j.route !== 'error') continue;\n    const from = esc(`${j.sender_name ? j.sender_name + ' ' : ''}<${j.sender}>`);\n    out.push({ json: { kind: 'read', file_name: j.file_name, text: [\n      `🛑 Reading the invoice failed for ${esc(j.file_name)} from ${from}.`,\n      'Impact: this invoice was not recorded.',\n      `Saved: the email is still in the inbox, and the attempt is in the processing log (${exec}).`,\n      readingNext(j),\n      `Error: ${esc(short(j.error_message || j.ai_error || 'unknown'))}`,\n    ].join('\\n') } });\n  }\n}\nreturn out;\n",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "c903fef3-a445-4715-8e86-f32d5d5e5589",
+      "name": "Slack: Reading Failed",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.7,
+      "position": [
+        480,
+        1860
+      ],
+      "parameters": {
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_AUTOMATION_ERRORS_CHANNEL_ID"
+        },
+        "messageType": "text",
+        "operation": "post",
+        "otherOptions": {
+          "includeLinkToWorkflow": false,
+          "unfurl_links": false,
+          "unfurl_media": false
+        },
+        "resource": "message",
+        "select": "channel",
+        "text": "={{ $json.text }}"
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "webhookId": "e857e7e4-82b2-437f-80a7-e7c49f3cd5c3"
+    },
+    {
+      "id": "caaf8163-39f2-4bb3-9b14-e7c98ddddf39",
+      "name": "Log: Needs Review",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        1620
+      ],
+      "parameters": {
+        "jsCode": "// Stage 7b: one row in the data table p3_processing_log for every document from the inbox.\n// The same code runs in three places and recognises where it is from its input:\n//   - after To Record? \"false\": duplicates, non-invoices and errors (nothing recorded)\n//   - after Create Invoice Record: needs-review invoices (Airtable record, Drive link)\n//   - after Attachment Check: recorded invoices (plus QuickBooks bill and attachment result)\n// duration_ms runs from the start of reading (Read Path) to this row.\nconst now = Date.now();\nconst str = (v) => (v === null || v === undefined || v === '' ? null : String(v));\nconst num = (v) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));\n\nfunction row(j, extra) {\n  const inv = j.invoice || {};\n  return {\n    received_at: str(j.received_at),\n    mode: str(j.source),\n    run_id: str(j.run_id),\n    case_id: str(j.case_id),\n    email_id: str(j.email_id),\n    sender: str(j.sender ? `${j.sender_name ? j.sender_name + ' ' : ''}<${j.sender}>` : null),\n    subject: str(j.subject),\n    file_name: str(j.file_name),\n    read_path: str(j.read_path),\n    route: str(j.route),\n    reasons: str((j.reasons || []).join(', ')),\n    supplier: str((j.vendor && j.vendor.name) || inv.supplier),\n    invoice_number: str(inv.invoice_number),\n    total: num(inv.total),\n    dup_key: str(j.dup_key),\n    extracted: j.reading ? JSON.stringify(j.reading) : null,\n    airtable_id: null,\n    quickbooks_bill_id: null,\n    drive_url: null,\n    error_step: str(j.error_step),\n    error_message: str(j.error_message),\n    duration_ms: j.read_started_at ? now - j.read_started_at : null,\n    execution_id: String($execution.id),\n    ...extra,\n  };\n}\n\nconst items = $input.all();\nconst first = items.length ? items[0].json : {};\nconst out = [];\n\nif (first.attachments) {\n  // Recorded invoices: one Bill Requests item per bill, in the same order as Create Bill.\n  const prepared = $('Prepare Record').all().map((p) => p.json);\n  const bills = $('Create Bill').all().map((b) => b.json.Bill || {});\n  const records = $('Create Invoice Record').all().map((c) => (c.json.records || [])[0]).filter(Boolean);\n  const attachments = first.attachments;\n  $('Bill Requests').all().forEach((reqItem, i) => {\n    const req = reqItem.json;\n    const j = prepared.find((p) => p.dup_key === req.dup_key);\n    if (!j) return;\n    const bill = bills[i] || {};\n    const record = records.find((r) => r.id === req.airtable_record_id) || { fields: {} };\n    const att = attachments.find((a) => a.bill_id === String(bill.Id)) || null;\n    out.push(row(j, {\n      airtable_id: req.airtable_record_id,\n      quickbooks_bill_id: str(bill.Id),\n      drive_url: str(record.fields.PDF),\n      error_step: att && !att.ok ? 'attach_pdf' : null,\n      error_message: att && !att.ok ? str(att.error) : null,\n    }));\n  });\n} else if (first.records) {\n  // Needs-review invoices, right after their Airtable record was created.\n  items.forEach((item, i) => {\n    const record = (item.json.records || [])[0];\n    const j = $('Prepare Record').itemMatching(i).json;\n    if (!record || j.route !== 'needs_review') return;\n    out.push(row(j, { airtable_id: record.id, drive_url: str(record.fields.PDF) }));\n  });\n} else {\n  // Not recorded on purpose (duplicate, not an invoice) or failed (error).\n  items.forEach((item) => out.push(row(item.json, {})));\n}\n\nreturn out.map((json) => ({ json }));\n",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "94a039bc-07ae-4a0c-bcad-9770a39f56c6",
+      "name": "Save Log: Needs Review",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1920,
+        1620
+      ],
+      "parameters": {
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "matchingColumns": [],
+          "schema": [
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "received_at",
+              "id": "received_at",
+              "required": false,
+              "type": "dateTime"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "mode",
+              "id": "mode",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "run_id",
+              "id": "run_id",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "case_id",
+              "id": "case_id",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "email_id",
+              "id": "email_id",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "sender",
+              "id": "sender",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "subject",
+              "id": "subject",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "file_name",
+              "id": "file_name",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "read_path",
+              "id": "read_path",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "route",
+              "id": "route",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "reasons",
+              "id": "reasons",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "supplier",
+              "id": "supplier",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "invoice_number",
+              "id": "invoice_number",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "total",
+              "id": "total",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "dup_key",
+              "id": "dup_key",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "extracted",
+              "id": "extracted",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "airtable_id",
+              "id": "airtable_id",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "quickbooks_bill_id",
+              "id": "quickbooks_bill_id",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "drive_url",
+              "id": "drive_url",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "error_step",
+              "id": "error_step",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "error_message",
+              "id": "error_message",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "duration_ms",
+              "id": "duration_ms",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "execution_id",
+              "id": "execution_id",
+              "required": false,
+              "type": "string"
+            }
+          ],
+          "value": {}
+        },
+        "dataTableId": {
+          "__rl": true,
+          "cachedResultName": "p3_processing_log",
+          "mode": "id",
+          "value": "YOUR_PROCESSING_LOG_TABLE_ID"
+        },
+        "operation": "insert",
+        "options": {},
+        "resource": "row"
+      }
+    },
+    {
+      "id": "b48e457b-4b50-4330-bf9b-eb5d7fcd9dd0",
+      "name": "Log: Recorded",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3840,
+        940
+      ],
+      "parameters": {
+        "jsCode": "// Stage 7b: one row in the data table p3_processing_log for every document from the inbox.\n// The same code runs in three places and recognises where it is from its input:\n//   - after To Record? \"false\": duplicates, non-invoices and errors (nothing recorded)\n//   - after Create Invoice Record: needs-review invoices (Airtable record, Drive link)\n//   - after Attachment Check: recorded invoices (plus QuickBooks bill and attachment result)\n// duration_ms runs from the start of reading (Read Path) to this row.\nconst now = Date.now();\nconst str = (v) => (v === null || v === undefined || v === '' ? null : String(v));\nconst num = (v) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));\n\nfunction row(j, extra) {\n  const inv = j.invoice || {};\n  return {\n    received_at: str(j.received_at),\n    mode: str(j.source),\n    run_id: str(j.run_id),\n    case_id: str(j.case_id),\n    email_id: str(j.email_id),\n    sender: str(j.sender ? `${j.sender_name ? j.sender_name + ' ' : ''}<${j.sender}>` : null),\n    subject: str(j.subject),\n    file_name: str(j.file_name),\n    read_path: str(j.read_path),\n    route: str(j.route),\n    reasons: str((j.reasons || []).join(', ')),\n    supplier: str((j.vendor && j.vendor.name) || inv.supplier),\n    invoice_number: str(inv.invoice_number),\n    total: num(inv.total),\n    dup_key: str(j.dup_key),\n    extracted: j.reading ? JSON.stringify(j.reading) : null,\n    airtable_id: null,\n    quickbooks_bill_id: null,\n    drive_url: null,\n    error_step: str(j.error_step),\n    error_message: str(j.error_message),\n    duration_ms: j.read_started_at ? now - j.read_started_at : null,\n    execution_id: String($execution.id),\n    ...extra,\n  };\n}\n\nconst items = $input.all();\nconst first = items.length ? items[0].json : {};\nconst out = [];\n\nif (first.attachments) {\n  // Recorded invoices: one Bill Requests item per bill, in the same order as Create Bill.\n  const prepared = $('Prepare Record').all().map((p) => p.json);\n  const bills = $('Create Bill').all().map((b) => b.json.Bill || {});\n  const records = $('Create Invoice Record').all().map((c) => (c.json.records || [])[0]).filter(Boolean);\n  const attachments = first.attachments;\n  $('Bill Requests').all().forEach((reqItem, i) => {\n    const req = reqItem.json;\n    const j = prepared.find((p) => p.dup_key === req.dup_key);\n    if (!j) return;\n    const bill = bills[i] || {};\n    const record = records.find((r) => r.id === req.airtable_record_id) || { fields: {} };\n    const att = attachments.find((a) => a.bill_id === String(bill.Id)) || null;\n    out.push(row(j, {\n      airtable_id: req.airtable_record_id,\n      quickbooks_bill_id: str(bill.Id),\n      drive_url: str(record.fields.PDF),\n      error_step: att && !att.ok ? 'attach_pdf' : null,\n      error_message: att && !att.ok ? str(att.error) : null,\n    }));\n  });\n} else if (first.records) {\n  // Needs-review invoices, right after their Airtable record was created.\n  items.forEach((item, i) => {\n    const record = (item.json.records || [])[0];\n    const j = $('Prepare Record').itemMatching(i).json;\n    if (!record || j.route !== 'needs_review') return;\n    out.push(row(j, { airtable_id: record.id, drive_url: str(record.fields.PDF) }));\n  });\n} else {\n  // Not recorded on purpose (duplicate, not an invoice) or failed (error).\n  items.forEach((item) => out.push(row(item.json, {})));\n}\n\nreturn out.map((json) => ({ json }));\n",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "6e798603-23db-4666-a512-843cbe9f7f6e",
+      "name": "Save Log: Recorded",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        4080,
+        940
+      ],
+      "parameters": {
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "matchingColumns": [],
+          "schema": [
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "received_at",
+              "id": "received_at",
+              "required": false,
+              "type": "dateTime"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "mode",
+              "id": "mode",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "run_id",
+              "id": "run_id",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "case_id",
+              "id": "case_id",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "email_id",
+              "id": "email_id",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "sender",
+              "id": "sender",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "subject",
+              "id": "subject",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "file_name",
+              "id": "file_name",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "read_path",
+              "id": "read_path",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "route",
+              "id": "route",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "reasons",
+              "id": "reasons",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "supplier",
+              "id": "supplier",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "invoice_number",
+              "id": "invoice_number",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "total",
+              "id": "total",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "dup_key",
+              "id": "dup_key",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "extracted",
+              "id": "extracted",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "airtable_id",
+              "id": "airtable_id",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "quickbooks_bill_id",
+              "id": "quickbooks_bill_id",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "drive_url",
+              "id": "drive_url",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "error_step",
+              "id": "error_step",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "error_message",
+              "id": "error_message",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "duration_ms",
+              "id": "duration_ms",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "execution_id",
+              "id": "execution_id",
+              "required": false,
+              "type": "string"
+            }
+          ],
+          "value": {}
+        },
+        "dataTableId": {
+          "__rl": true,
+          "cachedResultName": "p3_processing_log",
+          "mode": "id",
+          "value": "YOUR_PROCESSING_LOG_TABLE_ID"
+        },
+        "operation": "insert",
+        "options": {},
+        "resource": "row"
+      }
+    },
+    {
+      "id": "7c75bfb7-b982-4149-a598-41597e6d27b5",
+      "name": "Alert: Attachment Failed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3840,
+        1160
+      ],
+      "parameters": {
+        "jsCode": "// Stage 7b: technical problems go to #automation-errors (not #invoice-review), written by code:\n// what failed, what it means, what is saved, and what to do next.\n// The same code runs in two places and recognises where it is from its input:\n//   - after To Record? \"false\": documents with route \"error\" (the reading failed)\n//   - after Attachment Check: PDFs that did not reach their QuickBooks bill\nconst esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst short = (s, n = 300) => (String(s).length > n ? String(s).slice(0, n - 1) + '…' : String(s));\nconst exec = `execution ${$execution.id}`;\n\n// What to do next after a failed reading depends on the kind of failure.\nfunction readingNext(j) {\n  const err = String(j.error_message || j.ai_error || '');\n  if (j.pdf_header_ok === false) return 'Next: the file is not a real PDF (it does not start with %PDF). Ask the sender for the invoice as a PDF, then forward it again.';\n  if (/unavailable|overloaded|503|timed? ?out|ECONNRESET|socket hang up/i.test(err)) return 'Next: Gemini was busy or unreachable for a moment; the invoice itself is fine. Forward the email again in a few minutes.';\n  if (/too many requests|429|quota|rate limit|RESOURCE_EXHAUSTED/i.test(err)) return 'Next: the Gemini quota or rate limit was reached. Forward the email again in a few minutes; if it keeps happening, check the quota of the API key.';\n  if (/authoriz|forbidden|401|403|api key|credential/i.test(err)) return 'Next: check the Gemini API key in the n8n credential, then forward the email again.';\n  if (/not valid JSON|no text|not an object/i.test(err)) return 'Next: Gemini answered, but not in the expected format. Forward the email again; if it fails twice, enter the invoice by hand.';\n  return 'Next: check the Gemini API key, the model name and the quota in n8n, then forward the email again.';\n}\n\nconst items = $input.all();\nconst first = items.length ? items[0].json : {};\nconst out = [];\n\nif (first.attachments) {\n  for (const a of first.attachments.filter((x) => !x.ok)) {\n    out.push({ json: { kind: 'attach_pdf', text: [\n      `🛑 Attaching the PDF to QuickBooks bill ${esc(a.bill_id)} failed (${esc(a.invoice_number)}, ${esc(a.file_name)}).`,\n      'Impact: the bill was created, but it has no PDF attached.',\n      `Saved: the PDF is in the Drive folder Invoices, and the attempt is in the processing log (${exec}).`,\n      'Next: attach the PDF to the bill by hand in QuickBooks. If it keeps failing, check the QuickBooks login (Sandbox environment) in n8n.',\n      `Error: ${esc(short(a.error || 'unknown'))}`,\n    ].join('\\n') } });\n  }\n} else {\n  for (const item of items) {\n    const j = item.json;\n    if (j.route !== 'error') continue;\n    const from = esc(`${j.sender_name ? j.sender_name + ' ' : ''}<${j.sender}>`);\n    out.push({ json: { kind: 'read', file_name: j.file_name, text: [\n      `🛑 Reading the invoice failed for ${esc(j.file_name)} from ${from}.`,\n      'Impact: this invoice was not recorded.',\n      `Saved: the email is still in the inbox, and the attempt is in the processing log (${exec}).`,\n      readingNext(j),\n      `Error: ${esc(short(j.error_message || j.ai_error || 'unknown'))}`,\n    ].join('\\n') } });\n  }\n}\nreturn out;\n",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "06adc2de-6b0c-4c0f-a985-94b1f995926a",
+      "name": "Slack: Attachment Failed",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.7,
+      "position": [
+        4080,
+        1160
+      ],
+      "parameters": {
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_AUTOMATION_ERRORS_CHANNEL_ID"
+        },
+        "messageType": "text",
+        "operation": "post",
+        "otherOptions": {
+          "includeLinkToWorkflow": false,
+          "unfurl_links": false,
+          "unfurl_media": false
+        },
+        "resource": "message",
+        "select": "channel",
+        "text": "={{ $json.text }}"
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "webhookId": "525d81cb-9701-4d4e-86ea-99abc03d21cf"
+    },
+    {
+      "id": "4b8df400-03a1-47eb-a2a7-87133beff4d9",
+      "name": "Sticky Note 7b not recorded",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        190,
+        1460
+      ],
+      "parameters": {
+        "color": 7,
+        "content": "## 7b. Log and alert: not recorded\nEvery duplicate, non-invoice and failed document gets a row in p3_processing_log. A failed reading also goes to #automation-errors: what failed, the impact, what is saved, and what to do next.",
+        "height": 580,
+        "width": 560
+      }
+    },
+    {
+      "id": "4f76c5e6-fd7d-4643-b9bc-cb5304b4cef9",
+      "name": "Sticky Note 7b needs review",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1630,
+        1460
+      ],
+      "parameters": {
+        "color": 7,
+        "content": "## 7b. Log: needs review\nOne row in p3_processing_log per needs-review invoice, with its Airtable record and Drive link.",
+        "height": 320,
+        "width": 560
+      }
+    },
+    {
+      "id": "06219af7-3247-4b4e-b647-0b7a400f4bc2",
+      "name": "Sticky Note 7b recorded",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        3790,
+        760
+      ],
+      "parameters": {
+        "color": 7,
+        "content": "## 7b. Log and alert: recorded\nOne row in p3_processing_log per recorded invoice, with its QuickBooks bill. A PDF that did not reach its bill goes to #automation-errors.",
+        "height": 580,
+        "width": 560
+      }
+    },
+    {
+      "id": "e8007fc6-9a6d-40d8-aaf8-b954f3dc66b4",
+      "name": "Skip Processed Emails",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "cachedResultName": "p3_processing_log",
+          "mode": "id",
+          "value": "YOUR_PROCESSING_LOG_TABLE_ID"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "condition": "eq",
+              "keyName": "email_id",
+              "keyValue": "={{ $json.email_id }}"
+            }
+          ]
+        },
+        "matchType": "allConditions",
+        "operation": "rowNotExists",
+        "resource": "row"
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "New Invoice Email": {
+      "main": [
+        [
+          {
+            "node": "Split Attachments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Prepare PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Called by Eval Runner": {
+      "main": [
+        [
+          {
+            "node": "Test File Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Test File Request": {
+      "main": [
+        [
+          {
+            "node": "Download Test File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dev: Read 3 Test Files": {
+      "main": [
+        [
+          {
+            "node": "List Test Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List Test Files": {
+      "main": [
+        [
+          {
+            "node": "Pick Dev Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick Dev Files": {
+      "main": [
+        [
+          {
+            "node": "Test File Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Test File": {
+      "main": [
+        [
+          {
+            "node": "Shape Test Item",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shape Test Item": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare PDF": {
+      "main": [
+        [
+          {
+            "node": "Extract PDF Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract PDF Text": {
+      "main": [
+        [
+          {
+            "node": "Read Path",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Path": {
+      "main": [
+        [
+          {
+            "node": "Read Invoice (Gemini)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Invoice (Gemini)": {
+      "main": [
+        [
+          {
+            "node": "Parse Reading",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Parse Reading": {
+      "main": [
+        [
+          {
+            "node": "Check & Allocate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check & Allocate": {
+      "main": [
+        [
+          {
+            "node": "Test File?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Test File?": {
+      "main": [
+        [
+          {
+            "node": "Decide Route",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Find Earlier Invoices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Earlier Invoices": {
+      "main": [
+        [
+          {
+            "node": "Decide Route",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decide Route": {
+      "main": [
+        [
+          {
+            "node": "Eval Run?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eval Run?": {
+      "main": [
+        [
+          {
+            "node": "Eval Result",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "To Record?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Record": {
+      "main": [
+        [
+          {
+            "node": "Save PDF to Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save PDF to Drive": {
+      "main": [
+        [
+          {
+            "node": "Invoice Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Invoice Request": {
+      "main": [
+        [
+          {
+            "node": "Create Invoice Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Invoice Record": {
+      "main": [
+        [
+          {
+            "node": "Line Item Requests",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Review Messages",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Log: Needs Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Line Item Requests": {
+      "main": [
+        [
+          {
+            "node": "Create Line Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "To Record?": {
+      "main": [
+        [
+          {
+            "node": "Find QuickBooks Vendors",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip Messages",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Log: Not Recorded",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Alert: Reading Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find QuickBooks Vendors": {
+      "main": [
+        [
+          {
+            "node": "Match Vendor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Match Vendor": {
+      "main": [
+        [
+          {
+            "node": "Prepare Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Line Items": {
+      "main": [
+        [
+          {
+            "node": "Bill Requests",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bill Requests": {
+      "main": [
+        [
+          {
+            "node": "Create Bill",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Bill": {
+      "main": [
+        [
+          {
+            "node": "Bill ID Updates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bill ID Updates": {
+      "main": [
+        [
+          {
+            "node": "Save Bill ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Bill ID": {
+      "main": [
+        [
+          {
+            "node": "Attachment Requests",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attachment Requests": {
+      "main": [
+        [
+          {
+            "node": "Attach PDF to Bill",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach PDF to Bill": {
+      "main": [
+        [
+          {
+            "node": "Attachment Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip Messages": {
+      "main": [
+        [
+          {
+            "node": "Slack: Skipped",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Review Messages": {
+      "main": [
+        [
+          {
+            "node": "Slack: Review Needed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log: Not Recorded": {
+      "main": [
+        [
+          {
+            "node": "Save Log: Not Recorded",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert: Reading Failed": {
+      "main": [
+        [
+          {
+            "node": "Slack: Reading Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log: Needs Review": {
+      "main": [
+        [
+          {
+            "node": "Save Log: Needs Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attachment Check": {
+      "main": [
+        [
+          {
+            "node": "Log: Recorded",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Alert: Attachment Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log: Recorded": {
+      "main": [
+        [
+          {
+            "node": "Save Log: Recorded",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert: Attachment Failed": {
+      "main": [
+        [
+          {
+            "node": "Slack: Attachment Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Attachments": {
+      "main": [
+        [
+          {
+            "node": "Skip Processed Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip Processed Emails": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Denver",
+    "binaryMode": "separate"
+  },
+  "tags": []
+}

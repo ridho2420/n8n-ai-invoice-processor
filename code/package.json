@@ -1,0 +1,11 @@
+{
+  "name": "copper-kettle-invoice-processor-code",
+  "private": true,
+  "description": "Code nodes of the n8n workflows, with local tests (no n8n needed)",
+  "scripts": {
+    "test": "node test/stage45.test.js ../evals/test-cases.json ../test-set/p3-test-set-source.json && node test/stage6a.test.js ../evals/test-cases.json ../test-set/p3-test-set-source.json && node test/stage6b.test.js ../evals/test-cases.json ../test-set/p3-test-set-source.json && node test/stage7a.test.js ../evals/test-cases.json ../test-set/p3-test-set-source.json && node test/stage7b.test.js ../evals/test-cases.json ../test-set/p3-test-set-source.json && node eval/test/eval.test.js ../evals/test-cases.json ../test-set/p3-test-set-source.json && node tools/error_alert_message.test.js"
+  },
+  "dependencies": {
+    "luxon": "3.5.0"
+  }
+}

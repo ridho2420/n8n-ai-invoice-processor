@@ -1,0 +1,985 @@
+{
+  "name": "Copper Kettle – Eval Runner",
+  "nodes": [
+    {
+      "id": "bf873e03-689f-412d-89db-e3fad0770eee",
+      "name": "Run",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "25b94bb0-787b-469f-94e9-1811590c99cf",
+      "name": "Start Run",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// One evaluation run of the Copper Kettle invoice processor (Project 3).\n// CRITERIA_VERSION goes up whenever a check or a test case changes.\n// Scores are only compared between runs with the same criteria version.\nconst CRITERIA_VERSION = 'p3-v2';\n// What changed since the last run (prompt, model, rule). Updated before each run.\nconst NOTE = 'Regression check after stages 6-7: Config now holds QuickBooks IDs, Gemini retries 3 to 5. Prompt unchanged (p3-prompt-v2)';\n// For a quick test, list case IDs here (for example ['T01', 'T11']). Empty = all cases.\nconst ONLY = [];\n\nconst now = $now.setZone('Asia/Jakarta');\nreturn [{\n  json: {\n    project: 'p3',\n    run_id: 'p3-' + now.toFormat('yyyyLLdd-HHmm'),\n    criteria_version: CRITERIA_VERSION,\n    note: NOTE,\n    started_at: $now.toISO(),\n    only: ONLY,\n  },\n}];\n"
+      }
+    },
+    {
+      "id": "014cb9a2-4b9a-4173-b96a-58faccb39caa",
+      "name": "Read Cases",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        448,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_EVAL_CASES_TABLE_ID",
+          "cachedResultName": "p3_eval_cases"
+        },
+        "returnAll": true,
+        "orderBy": true,
+        "orderByColumn": "ord",
+        "orderByDirection": "ASC"
+      },
+      "executeOnce": true
+    },
+    {
+      "id": "f6949c1f-8583-415a-9308-2311664b5da6",
+      "name": "List Test Files",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        672,
+        0
+      ],
+      "parameters": {
+        "resource": "fileFolder",
+        "operation": "search",
+        "searchMethod": "name",
+        "queryString": ".pdf",
+        "returnAll": true,
+        "filter": {
+          "folderId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "YOUR_TEST_SET_FOLDER_ID"
+          },
+          "whatToSearch": "files"
+        },
+        "options": {
+          "fields": [
+            "id",
+            "name"
+          ]
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "executeOnce": true
+    },
+    {
+      "id": "2b649902-cc2f-4e86-9f01-37a094e1b2f8",
+      "name": "Prepare Cases",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Matches every test case with its PDF in the Drive folder \"test-set\" (by file name),\n// in case order. A quick test can limit the cases with ONLY in \"Start Run\".\n// A case whose file is missing still runs, so the failure shows up in the results.\nconst start = $('Start Run').first().json;\nconst only = Array.isArray(start.only) ? start.only.map(String) : [];\nconst files = {};\nfor (const f of $('List Test Files').all()) {\n  if (f.json && f.json.name) files[f.json.name] = f.json.id;\n}\nconst rows = $('Read Cases').all().map((i) => i.json)\n  .filter((r) => r.case_id && (!only.length || only.includes(String(r.case_id))))\n  .sort((a, b) => Number(a.ord) - Number(b.ord));\nreturn rows.map((r) => ({\n  json: { ...r, run_id: start.run_id, file_id: files[r.file_name] || null },\n}));\n"
+      }
+    },
+    {
+      "id": "362be743-2343-4acf-8163-5459ddc8d045",
+      "name": "Read Run Results",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1344,
+        -224
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_EVAL_RESULTS_TABLE_ID",
+          "cachedResultName": "eval_results"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "run_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Start Run').first().json.run_id }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "executeOnce": true
+    },
+    {
+      "id": "d561fd1b-b82c-42f2-ad71-8db7222970b4",
+      "name": "Read Previous Runs",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1568,
+        -224
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_EVAL_RUNS_TABLE_ID",
+          "cachedResultName": "eval_runs"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "project",
+              "condition": "eq",
+              "keyValue": "p3"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "87c008de-5298-4e03-b957-6bd719c047fd",
+      "name": "Summarize",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1792,
+        -224
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// One summary per run: score, score per check group, accuracy per field and per line\n// (store and category), score per case type, Gemini time per document, change vs the\n// previous full run with the same criteria version, and the failed cases.\nconst start = $('Start Run').first().json;\nconst rows = $('Read Run Results').all().map((i) => i.json)\n  .filter((r) => r.run_id === start.run_id)\n  .sort((a, b) => String(a.case_id).localeCompare(String(b.case_id)));\nconst isPass = (v) => v === true || v === 'true';\nconst parse = (s) => { try { return JSON.parse(s || '{}'); } catch (e) { return {}; } };\nconst total = rows.length;\nconst passed = rows.filter((r) => isPass(r.passed)).length;\nconst group = (name) => {\n  const have = rows.filter((r) => r[name + '_ok'] === 'pass' || r[name + '_ok'] === 'fail');\n  return have.filter((r) => r[name + '_ok'] === 'pass').length + '/' + have.length;\n};\nconst details = rows.map((r) => ({ case_id: r.case_id, passed: isPass(r.passed), ...parse(r.detail) }));\n\n// Fields, over the invoices of the run (a run failure counts as wrong)\nconst invoices = details.filter((d) => d.key_lines > 0);\nconst FIELDS = ['invoice_number', 'supplier', 'invoice_date', 'due_date', 'currency', 'subtotal', 'tax', 'total', 'line_items'];\nconst fieldScore = {};\nfor (const f of FIELDS) fieldScore[f] = invoices.filter((d) => d.fields && d.fields[f] === 'ok').length + '/' + invoices.length;\n\n// Lines: store and category per line, over all answer-key lines of the invoices in the run\nconst keyLines = invoices.reduce((s, d) => s + (d.key_lines || 0), 0);\nconst compared = invoices.reduce((s, d) => s + (d.lines_compared || 0), 0);\nconst branchOk = invoices.reduce((s, d) => s + (d.branch_ok || 0), 0);\nconst categoryOk = invoices.reduce((s, d) => s + (d.category_ok || 0), 0);\n\n// Case types\nconst types = {};\nfor (const d of details) {\n  const t = d.case_type || 'unknown';\n  types[t] = types[t] || { passed: 0, cases: 0 };\n  types[t].cases++;\n  if (d.passed) types[t].passed++;\n}\n\n// Gemini: one call per document (retries inside n8n are not counted)\nconst times = rows.map((r) => Number(r.read_ms)).filter((n) => Number.isFinite(n) && n > 0);\nconst avgSeconds = times.length ? Math.round(times.reduce((s, n) => s + n, 0) / times.length / 100) / 10 : null;\nconst maxSeconds = times.length ? Math.round(Math.max(...times) / 100) / 10 : null;\n\nconst prev = $('Read Previous Runs').all().map((i) => i.json)\n  // Only full runs of the same size and criteria are comparable (a quick test with ONLY is not).\n  .filter((r) => r.run_id && r.run_id !== start.run_id && r.project === start.project\n    && r.criteria_version === start.criteria_version && Number(r.cases) === total)\n  .sort((a, b) => String(b.run_id).localeCompare(String(a.run_id)))[0];\nconst failed = rows.filter((r) => !isPass(r.passed));\n\nlet delta = '';\nif (prev) {\n  const d = passed - Number(prev.passed);\n  delta = ` (${d > 0 ? '+' + d : d === 0 ? '±0' : d} vs ${prev.run_id}: ${prev.passed}/${prev.cases})`;\n}\nconst weakFields = FIELDS.filter((f) => !fieldScore[f].startsWith(String(invoices.length) + '/'));\nconst lines = [];\nlines.push(`:test_tube: *Eval run ${start.run_id}* · Copper Kettle invoice processor · criteria ${start.criteria_version}`);\nlines.push(`*Passed: ${passed}/${total}*${delta}`);\nlines.push(`Routing ${group('routing')} · Facts ${group('facts')} · Safety ${group('safety')} · Format ${group('format')} · Allocation ${group('allocation')}`);\nif (keyLines) lines.push(`Lines: store ${branchOk}/${keyLines} · category ${categoryOk}/${keyLines}` + (compared < keyLines ? ` (${keyLines - compared} lines not compared: line count wrong)` : ''));\nif (invoices.length) lines.push('Fields: ' + (weakFields.length ? weakFields.map((f) => `${f} ${fieldScore[f]}`).join(' · ') : `all ${FIELDS.length} fields ${invoices.length}/${invoices.length}`));\nlines.push('By type: ' + Object.entries(types).map(([t, v]) => `${t} ${v.passed}/${v.cases}`).join(' · '));\nif (avgSeconds !== null) lines.push(`Gemini: ${times.length} documents, ${avgSeconds} s average, ${maxSeconds} s slowest`);\nif (failed.length) {\n  lines.push('*Failed:*');\n  for (const r of failed) lines.push(`• ${r.case_id}: ${String(r.failed_checks).split(' | ').slice(0, 2).join('; ').slice(0, 240)}`);\n}\nif (start.note) lines.push(`_Change: ${start.note}_`);\n\nreturn [{\n  json: {\n    project: start.project,\n    run_id: start.run_id,\n    criteria_version: start.criteria_version,\n    note: start.note,\n    cases: total,\n    passed,\n    routing: group('routing'),\n    facts: group('facts'),\n    safety: group('safety'),\n    format: group('format'),\n    allocation: group('allocation'),\n    failed_cases: failed.map((r) => r.case_id).join(', '),\n    started_at: start.started_at,\n    finished_at: $now.toISO(),\n    detail: JSON.stringify({ fields: fieldScore, lines: { key_lines: keyLines, compared, store_ok: branchOk, category_ok: categoryOk },\n      types, gemini: { documents: times.length, avg_seconds: avgSeconds, max_seconds: maxSeconds } }),\n    slack_text: lines.join('\\n'),\n  },\n}];\n"
+      }
+    },
+    {
+      "id": "9e4a6afb-93b5-49f9-890a-2a224d81578e",
+      "name": "Save Run",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2016,
+        -224
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_EVAL_RUNS_TABLE_ID",
+          "cachedResultName": "eval_runs"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "project": "={{ $json.project }}",
+            "run_id": "={{ $json.run_id }}",
+            "criteria_version": "={{ $json.criteria_version }}",
+            "note": "={{ $json.note }}",
+            "cases": "={{ $json.cases }}",
+            "passed": "={{ $json.passed }}",
+            "routing": "={{ $json.routing }}",
+            "facts": "={{ $json.facts }}",
+            "safety": "={{ $json.safety }}",
+            "format": "={{ $json.format }}",
+            "allocation": "={{ $json.allocation }}",
+            "failed_cases": "={{ $json.failed_cases }}",
+            "started_at": "={{ $json.started_at }}",
+            "finished_at": "={{ $json.finished_at }}",
+            "detail": "={{ $json.detail }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "project",
+              "displayName": "project",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "run_id",
+              "displayName": "run_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "criteria_version",
+              "displayName": "criteria_version",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "note",
+              "displayName": "note",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "cases",
+              "displayName": "cases",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "passed",
+              "displayName": "passed",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "routing",
+              "displayName": "routing",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "facts",
+              "displayName": "facts",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "safety",
+              "displayName": "safety",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "format",
+              "displayName": "format",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "allocation",
+              "displayName": "allocation",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "failed_cases",
+              "displayName": "failed_cases",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "started_at",
+              "displayName": "started_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "finished_at",
+              "displayName": "finished_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "detail",
+              "displayName": "detail",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "7384128d-0df4-4290-82ff-a53727943fe7",
+      "name": "Slack: #eval-runs",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        2240,
+        -224
+      ],
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "YOUR_EVAL_RUNS_CHANNEL_ID",
+          "mode": "id"
+        },
+        "text": "={{ $('Summarize').first().json.slack_text }}",
+        "otherOptions": {
+          "includeLinkToWorkflow": false,
+          "unfurl_links": false,
+          "unfurl_media": false
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "webhookId": "7854bdee-57c6-424a-a93d-5bafa11e3ba7"
+    },
+    {
+      "id": "014ba8ae-9234-4ddf-823c-078b2e250dd7",
+      "name": "Pace Gemini",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1344,
+        224
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 5,
+        "unit": "seconds"
+      },
+      "webhookId": "2738e0fe-0c4b-439c-a18b-be4cd84140ce"
+    },
+    {
+      "id": "cece99b5-4b45-47b6-84b0-67c1ea6573e3",
+      "name": "Build Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        224
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// The request for this case, sent to \"Copper Kettle – Invoice Processor\" (eval mode).\n// prior_dup_keys = documents earlier in this run that would have been recorded\n// (recorded or needs_review), so a re-sent invoice (T11) can be caught as a duplicate,\n// exactly like Airtable does for real emails.\nconst tc = $('Pace Gemini').first().json;\nconst prior = [];\nfor (let i = 0; i < $runIndex; i++) {\n  let earlier = [];\n  try { earlier = $('Run Invoice Processor').all(0, i); } catch (e) { earlier = []; }\n  for (const it of earlier) {\n    const r = it.json || {};\n    if ((r.route === 'recorded' || r.route === 'needs_review') && r.dup_key) {\n      prior.push({ dup_key: r.dup_key, total: r.total, case_id: r.case_id });\n    }\n  }\n}\nreturn [{\n  json: {\n    run_id: tc.run_id,\n    case_id: String(tc.case_id),\n    file_id: tc.file_id || '',\n    file_name: tc.file_name,\n    prior_dup_keys: prior,\n  },\n}];\n"
+      }
+    },
+    {
+      "id": "2dfafb98-92a1-4a74-ac70-118c26495669",
+      "name": "Run Invoice Processor",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1792,
+        224
+      ],
+      "parameters": {
+        "mode": "each",
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_INVOICE_PROCESSOR_WORKFLOW_ID",
+          "cachedResultName": "Copper Kettle – Invoice Processor"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "run_id": "={{ $json.run_id }}",
+            "case_id": "={{ $json.case_id }}",
+            "file_id": "={{ $json.file_id }}",
+            "file_name": "={{ $json.file_name }}",
+            "prior_dup_keys": "={{ $json.prior_dup_keys }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "run_id",
+              "displayName": "run_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "case_id",
+              "displayName": "case_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "file_id",
+              "displayName": "file_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "file_name",
+              "displayName": "file_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "prior_dup_keys",
+              "displayName": "prior_dup_keys",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "array"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "1ac68c03-faef-47de-9a40-31d529530a27",
+      "name": "Check",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2016,
+        224
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Copper Kettle eval: code checks for one test case (criteria p3-v2, design doc section 8).\n// Input: the test case row (answer key) and the Eval Result returned by the invoice processor.\n// Five groups; one mistake counts in one group only:\n// - routing:    is_invoice, route, expected reason, duplicate_of\n// - facts:      printed values read correctly (invoices only)\n// - safety:     never invent a value the key has as null, never \"fix\" a printed number (invoices only)\n// - format:     dates YYYY-MM-DD, numbers as numbers, 3-letter currency, category from the list\n// - allocation: store and category per line, compared in order (only when the line count is right)\n// No AI judge: every answer is an exact value, so code is enough.\n\nconst TOL = 0.01;\nconst CATEGORIES = ['coffee_tea', 'dairy', 'food', 'packaging', 'supplies', 'cleaning_services', 'freight'];\nconst FIELDS = ['invoice_number', 'supplier', 'invoice_date', 'due_date', 'currency', 'subtotal', 'tax', 'total'];\n\nconst SUFFIXES = ['llc', 'inc', 'co', 'company', 'corp', 'ltd'];\nconst normSupplier = (s) => String(s || '').normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase()\n  .replace(/['\\u2019]/g, '').replace(/[^a-z0-9]+/g, ' ').trim().split(' ')\n  .filter((w) => w && !SUFFIXES.includes(w)).join(' ');\nconst normNumber = (s) => String(s || '').toUpperCase().replace(/[\\s#]/g, '');\nconst blank = (v) => v === null || v === undefined || v === '';\nconst num = (v) => (blank(v) || !Number.isFinite(Number(v)) ? null : Number(v));\nconst near = (a, b) => a !== null && b !== null && Math.abs(a - b) <= TOL + 1e-9;\nconst isDate = (v) => {\n  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(String(v))) return false;\n  const d = new Date(v + 'T00:00:00Z');\n  return !isNaN(d) && d.toISOString().slice(0, 10) === v;\n};\nconst show = (v) => (v === null || v === undefined ? 'null' : typeof v === 'string' ? `\"${v}\"` : String(v));\n\nfunction checkCase(tc, r) {\n  const checks = [];\n  const add = (group, name, ok, note) => checks.push({ group, name, ok: !!ok, note: ok ? '' : note });\n  const isInvoice = tc.expect_is_invoice === 'yes';\n  const reading = r.reading && typeof r.reading === 'object' && !Array.isArray(r.reading) ? r.reading : null;\n  const keyLines = tc.line_items;\n  const detail = { case_type: tc.case_type, fields: {}, key_lines: isInvoice ? keyLines.length : 0,\n    lines_compared: 0, branch_ok: 0, category_ok: 0 };\n\n  // ---- Routing ----\n  add('routing', 'is_invoice', r.is_invoice === isInvoice, `is_invoice ${show(r.is_invoice)}, expected ${isInvoice}`);\n  add('routing', 'route', r.route === tc.expect_route, `route ${r.route}, expected ${tc.expect_route}`);\n  if (!blank(tc.expect_reason)) {\n    const reasons = Array.isArray(r.reasons) ? r.reasons : [];\n    add('routing', 'reason', reasons.includes(tc.expect_reason), `reasons [${reasons.join(', ')}], expected ${tc.expect_reason}`);\n  }\n  if (!blank(tc.duplicate_of)) {\n    add('routing', 'duplicate_of', r.duplicate_of === tc.duplicate_of, `duplicate of ${show(r.duplicate_of)}, expected ${tc.duplicate_of}`);\n  }\n\n  // ---- Format (all 12 documents) ----\n  if (!reading) {\n    add('format', 'reading', false, 'no reading returned' + (r.ai_error ? ` (${String(r.ai_error).slice(0, 120)})` : ''));\n  } else {\n    const badDates = ['invoice_date', 'due_date'].filter((k) => reading[k] !== null && !isDate(reading[k]));\n    add('format', 'dates', !badDates.length, 'not YYYY-MM-DD: ' + badDates.map((k) => `${k} ${show(reading[k])}`).join(', '));\n    const badNums = ['subtotal', 'tax', 'total'].filter((k) => reading[k] !== null && typeof reading[k] !== 'number');\n    add('format', 'numbers', !badNums.length, 'not a number: ' + badNums.map((k) => `${k} ${show(reading[k])}`).join(', '));\n    add('format', 'currency', reading.currency === null || /^[A-Z]{3}$/.test(String(reading.currency)), `currency ${show(reading.currency)}`);\n    const lines = reading.line_items;\n    if (!Array.isArray(lines)) {\n      add('format', 'line_items', false, 'line_items is not a list');\n    } else {\n      const badLine = lines.findIndex((l) => !l || ['quantity', 'unit_price', 'amount'].some((k) => l[k] !== null && typeof l[k] !== 'number'));\n      add('format', 'line_numbers', badLine < 0, `line ${badLine + 1}: quantity, unit price or amount is not a number`);\n      const badCat = lines.findIndex((l) => l && l.category !== null && !CATEGORIES.includes(l.category));\n      add('format', 'category_code', badCat < 0, `line ${badCat + 1}: category ${show(lines[badCat] && lines[badCat].category)} is not in the list`);\n    }\n  }\n\n  if (!isInvoice) return summarize(tc, checks, detail); // T05: routing and format only\n\n  // ---- Facts and safety (invoices) ----\n  if (!reading) {\n    add('facts', 'reading', false, 'no reading returned');\n    add('allocation', 'reading', false, 'no reading returned');\n    return summarize(tc, checks, detail);\n  }\n  const key = {\n    invoice_number: blank(tc.invoice_number) ? null : tc.invoice_number,\n    supplier: blank(tc.supplier) ? null : tc.supplier,\n    invoice_date: blank(tc.invoice_date) ? null : tc.invoice_date,\n    due_date: blank(tc.due_date) ? null : tc.due_date,\n    currency: blank(tc.currency) ? null : tc.currency,\n    subtotal: num(tc.subtotal), tax: num(tc.tax), total: num(tc.total),\n  };\n  const got = {\n    invoice_number: blank(reading.invoice_number) ? null : reading.invoice_number,\n    supplier: blank(reading.supplier_name) ? null : reading.supplier_name,\n    invoice_date: blank(reading.invoice_date) ? null : reading.invoice_date,\n    due_date: blank(reading.due_date) ? null : reading.due_date,\n    currency: blank(reading.currency) ? null : String(reading.currency).toUpperCase(),\n    subtotal: num(reading.subtotal), tax: num(reading.tax), total: num(reading.total),\n  };\n  const same = {\n    invoice_number: (a, b) => normNumber(a) === normNumber(b),\n    supplier: (a, b) => normSupplier(a) === normSupplier(b),\n    invoice_date: (a, b) => a === b,\n    due_date: (a, b) => a === b,\n    currency: (a, b) => String(a).toUpperCase() === String(b).toUpperCase(),\n    subtotal: near, tax: near, total: near,\n  };\n  // Every invoice is scored for safety: it passes unless a check below finds an invented or \"fixed\" value.\n  add('safety', 'scored', true, '');\n  const keyLineSum = keyLines.reduce((s, l) => s + Number(l.amount), 0);\n  // A number that differs from the print but matches a recalculation = the AI \"fixed\" it.\n  const corrected = {\n    subtotal: (g) => near(g, keyLineSum),\n    total: (g) => near(g, (got.subtotal ?? key.subtotal) + (got.tax ?? key.tax ?? 0)),\n  };\n  for (const f of FIELDS) {\n    const k = key[f];\n    const g = got[f];\n    if ((f === 'invoice_date' || f === 'due_date') && g !== null && !isDate(g)) {\n      detail.fields[f] = 'format'; // already counted in the format group (one mistake, one group)\n    } else if (k === null) {\n      const ok = g === null;\n      add('safety', 'invented_value', ok, `${f}: key is empty but the AI wrote ${show(g)}`);\n      detail.fields[f] = ok ? 'ok' : 'safety';\n    } else if (g !== null && same[f](g, k)) {\n      detail.fields[f] = 'ok';\n    } else if (g !== null && corrected[f] && corrected[f](g)) {\n      add('safety', 'corrected_number', false, `${f}: printed ${show(k)}, AI wrote the recalculated ${show(g)}`);\n      detail.fields[f] = 'safety';\n    } else {\n      add('facts', f, false, `${f} ${show(g)}, expected ${show(k)}`);\n      detail.fields[f] = 'facts';\n    }\n  }\n\n  const lines = Array.isArray(reading.line_items) ? reading.line_items : [];\n  const countOk = lines.length === keyLines.length;\n  add('facts', 'line_count', countOk, `${lines.length} lines, expected ${keyLines.length}`);\n  detail.fields.line_items = countOk ? 'ok' : 'facts';\n  if (countOk) {\n    keyLines.forEach((kl, i) => {\n      const l = lines[i] || {};\n      const q = num(l.quantity), p = num(l.unit_price), a = num(l.amount);\n      const diffs = [];\n      if (!near(q, Number(kl.quantity))) diffs.push(`qty ${show(q)} vs ${kl.quantity}`);\n      if (!near(p, Number(kl.unit_price))) diffs.push(`price ${show(p)} vs ${kl.unit_price}`);\n      const amountOk = near(a, Number(kl.amount));\n      const amountFixed = !amountOk && q !== null && p !== null && near(a, q * p)\n        && !near(Number(kl.amount), Number(kl.quantity) * Number(kl.unit_price));\n      if (amountFixed) add('safety', 'corrected_number', false, `line ${i + 1} amount: printed ${kl.amount}, AI wrote the recalculated ${a}`);\n      else if (!amountOk) diffs.push(`amount ${show(a)} vs ${kl.amount}`);\n      if (diffs.length) add('facts', 'line_values', false, `line ${i + 1}: ${diffs.join(', ')}`);\n      if (diffs.length || amountFixed) detail.fields.line_items = amountFixed && !diffs.length ? 'safety' : 'facts';\n    });\n  }\n\n  // ---- Allocation (invoices, only when the line count is right) ----\n  if (!countOk) return summarize(tc, checks, detail);\n  const alloc = r.allocation || { ship_to_branch: null, lines: [] };\n  const keyBranch = blank(tc.ship_to_branch) ? null : tc.ship_to_branch;\n  add('allocation', 'ship_to_branch', (alloc.ship_to_branch ?? null) === keyBranch,\n    `ship-to store ${show(alloc.ship_to_branch ?? null)}, expected ${show(keyBranch)} (AI ship_to ${show(reading.ship_to)})`);\n  const allocLines = Array.isArray(alloc.lines) ? alloc.lines : [];\n  detail.lines_compared = keyLines.length;\n  keyLines.forEach((kl, i) => {\n    const al = allocLines[i] || {};\n    if (al.branch === kl.branch) detail.branch_ok++;\n    else add('allocation', 'line_branch', false, `line ${i + 1} store ${show(al.branch)}, expected ${kl.branch}`);\n    if (al.category === kl.category) detail.category_ok++;\n    else add('allocation', 'line_category', false, `line ${i + 1} \"${String(kl.description).slice(0, 40)}\": category ${show(al.category)}, expected ${kl.category}`);\n  });\n  return summarize(tc, checks, detail);\n}\n\nfunction summarize(tc, checks, detail) {\n  const groups = {};\n  for (const c of checks) groups[c.group] = (groups[c.group] ?? true) && c.ok;\n  const failed = checks.filter((c) => !c.ok);\n  return { case_id: tc.case_id, passed: failed.length === 0, groups, failed_checks: failed.map((c) => `${c.group}/${c.name}: ${c.note}`), detail };\n}\n\n// ---- Check one case (runs once per case inside the loop) ----\nconst start = $('Start Run').first().json;\nconst row = $('Pace Gemini').first().json;\nconst r = $input.first().json || {};\nconst groupState = (groups, name) => (name in groups ? (groups[name] ? 'pass' : 'fail') : '-');\n\nlet keyLines = null;\ntry { keyLines = Array.isArray(row.line_items) ? row.line_items : JSON.parse(row.line_items || '[]'); } catch (e) { keyLines = null; }\n\nlet out;\nif (!Array.isArray(keyLines)) {\n  // A broken test case must never pass silently.\n  out = { case_id: row.case_id, passed: false, groups: {}, failed_checks: ['criteria: could not read line_items for this case'], detail: {} };\n} else if (!r.route) {\n  // The invoice processor itself failed for this case (download, crash, timeout).\n  const err = r.error ? ' (' + String(r.error.message || r.error).slice(0, 200) + ')' : '';\n  out = { case_id: row.case_id, passed: false, groups: {}, failed_checks: ['run: the invoice processor returned no result' + err],\n    detail: { case_type: row.case_type, fields: {}, key_lines: row.expect_is_invoice === 'yes' ? keyLines.length : 0, lines_compared: 0, branch_ok: 0, category_ok: 0 } };\n} else {\n  out = checkCase({ ...row, line_items: keyLines }, r);\n}\n\n// Short version of what the AI read, so a failure can be read without opening the execution.\nconst rd = r.reading;\nconst readingShort = rd ? {\n  n: rd.invoice_number, s: rd.supplier_name, d: rd.invoice_date, due: rd.due_date, cur: rd.currency,\n  sub: rd.subtotal, tax: rd.tax, tot: rd.total, ship: rd.ship_to,\n  lines: Array.isArray(rd.line_items) ? rd.line_items.map((l) => [l.quantity, l.unit_price, l.amount, l.category]) : null,\n} : null;\n\nreturn [{\n  json: {\n    project: start.project,\n    run_id: start.run_id,\n    criteria_version: start.criteria_version,\n    case_id: String(row.case_id),\n    passed: out.passed,\n    routing_ok: groupState(out.groups, 'routing'),\n    facts_ok: groupState(out.groups, 'facts'),\n    safety_ok: groupState(out.groups, 'safety'),\n    format_ok: groupState(out.groups, 'format'),\n    allocation_ok: groupState(out.groups, 'allocation'),\n    failed_checks: out.failed_checks.join(' | '),\n    route: r.route || '',\n    reason: Array.isArray(r.reasons) ? r.reasons.join(', ') : '',\n    reply: readingShort ? JSON.stringify(readingShort) : (r.ai_error || ''),\n    read_path: r.read_path || '',\n    read_ms: typeof r.read_ms === 'number' ? r.read_ms : null,\n    detail: JSON.stringify(out.detail),\n    execution_id: r.execution_id || '',\n  },\n}];\n"
+      }
+    },
+    {
+      "id": "6f822446-9b17-481d-be4b-75fec6bbbc51",
+      "name": "Save Result",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2240,
+        224
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_EVAL_RESULTS_TABLE_ID",
+          "cachedResultName": "eval_results"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "project": "={{ $json.project }}",
+            "run_id": "={{ $json.run_id }}",
+            "criteria_version": "={{ $json.criteria_version }}",
+            "case_id": "={{ $json.case_id }}",
+            "passed": "={{ $json.passed }}",
+            "routing_ok": "={{ $json.routing_ok }}",
+            "facts_ok": "={{ $json.facts_ok }}",
+            "safety_ok": "={{ $json.safety_ok }}",
+            "format_ok": "={{ $json.format_ok }}",
+            "allocation_ok": "={{ $json.allocation_ok }}",
+            "failed_checks": "={{ $json.failed_checks }}",
+            "route": "={{ $json.route }}",
+            "reason": "={{ $json.reason }}",
+            "reply": "={{ $json.reply }}",
+            "read_path": "={{ $json.read_path }}",
+            "read_ms": "={{ $json.read_ms }}",
+            "detail": "={{ $json.detail }}",
+            "execution_id": "={{ $json.execution_id }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "project",
+              "displayName": "project",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "run_id",
+              "displayName": "run_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "criteria_version",
+              "displayName": "criteria_version",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "case_id",
+              "displayName": "case_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "passed",
+              "displayName": "passed",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "routing_ok",
+              "displayName": "routing_ok",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "facts_ok",
+              "displayName": "facts_ok",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "safety_ok",
+              "displayName": "safety_ok",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "format_ok",
+              "displayName": "format_ok",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "allocation_ok",
+              "displayName": "allocation_ok",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "failed_checks",
+              "displayName": "failed_checks",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "route",
+              "displayName": "route",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "reason",
+              "displayName": "reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "reply",
+              "displayName": "reply",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "read_path",
+              "displayName": "read_path",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "read_ms",
+              "displayName": "read_ms",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "detail",
+              "displayName": "detail",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "execution_id",
+              "displayName": "execution_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "346e0cb0-fda6-4a56-9b41-a3d857a000cf",
+      "name": "Loop Over Cases",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1120,
+        0
+      ],
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      }
+    },
+    {
+      "id": "6d9fd1f9-3c9f-45aa-8cf2-e0d5c106948c",
+      "name": "Sticky Note 34a4b7aa",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -80,
+        -768
+      ],
+      "parameters": {
+        "content": "## Copper Kettle – Eval Runner\nRuns the 12 test documents (data table **p3_eval_cases**, PDFs in Drive `test-set`) through the real invoice processor in eval mode (it stops before Drive, Airtable, QuickBooks and Slack), checks every result with code against the answer key, and reports the score.\n\n**1. Load cases** → **2. Run and check each case** → **3. Summarize**\n\nBefore a run: write what changed in NOTE inside \"Start Run\". Raise CRITERIA_VERSION when a check or a case changes; scores are only compared within one version. One Gemini call per document, 5 seconds apart (free tier: 15 per minute).",
+        "color": 7,
+        "width": 1420,
+        "height": 400
+      }
+    },
+    {
+      "id": "93505169-896b-4fde-9991-f846e02d778b",
+      "name": "Sticky Note 7b3d15b1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -80,
+        -320
+      ],
+      "parameters": {
+        "content": "### 1. Load cases\nReads the answer key in order and finds each PDF in Drive by file name. ONLY in \"Start Run\" limits a quick test to a few cases.",
+        "color": 5,
+        "width": 1320,
+        "height": 880
+      }
+    },
+    {
+      "id": "e4a6fee2-6e27-49e0-92f2-1418db446aa1",
+      "name": "Sticky Note 944417e2",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1280,
+        40
+      ],
+      "parameters": {
+        "content": "### 2. Run and check each case\nThe invoice processor reads the PDF and decides the route. **Code decides pass or fail** in five groups: Routing, Facts (printed values), Safety (nothing invented, no number \"fixed\"), Format, Allocation (store and category per line). Earlier documents of the run are passed on, so a re-sent invoice is caught as a duplicate.",
+        "color": 4,
+        "width": 1140,
+        "height": 560
+      }
+    },
+    {
+      "id": "6487e137-596d-4bbe-8d61-89df04c0cd7b",
+      "name": "Sticky Note 8a74d7ae",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1280,
+        -400
+      ],
+      "parameters": {
+        "content": "### 3. Summarize\nScore, score per group, accuracy per field and per line (store, category), score per case type, Gemini seconds per document, change since the last run with the same criteria, and failed cases. Saved to **eval_runs** and posted to #eval-runs.",
+        "color": 6,
+        "width": 1140,
+        "height": 420
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Run": {
+      "main": [
+        [
+          {
+            "node": "Start Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start Run": {
+      "main": [
+        [
+          {
+            "node": "Read Cases",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Cases": {
+      "main": [
+        [
+          {
+            "node": "List Test Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List Test Files": {
+      "main": [
+        [
+          {
+            "node": "Prepare Cases",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Cases": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Cases",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Run Results": {
+      "main": [
+        [
+          {
+            "node": "Read Previous Runs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Previous Runs": {
+      "main": [
+        [
+          {
+            "node": "Summarize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize": {
+      "main": [
+        [
+          {
+            "node": "Save Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Run": {
+      "main": [
+        [
+          {
+            "node": "Slack: #eval-runs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pace Gemini": {
+      "main": [
+        [
+          {
+            "node": "Build Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Request": {
+      "main": [
+        [
+          {
+            "node": "Run Invoice Processor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Invoice Processor": {
+      "main": [
+        [
+          {
+            "node": "Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check": {
+      "main": [
+        [
+          {
+            "node": "Save Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Result": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Cases",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Cases": {
+      "main": [
+        [
+          {
+            "node": "Read Run Results",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Pace Gemini",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}
